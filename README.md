@@ -8,10 +8,11 @@ Projeto mantido por [odevpedro](https://github.com/odevpedro) (`pedrosschmidt2@g
 
 ## Estado
 
-**Fase 2 — bridge simulado concluído em 2026-08-06.** O plugin possui interface
+**Fase 3 — integração desktop em andamento desde 2026-08-06.** O plugin possui interface
 KOReader funcional com MockBridge; o bridge Go, Board API, Unix socket e adaptador Lua
-foram implementados e testados localmente. O modo padrão continua mock: ainda não houve
-token, conexão real com o Lichess, build ARM ou pacote instalável.
+foram implementados e testados localmente. O executável desktop e a seleção explícita de
+modo real estão prontos. Ainda não houve autenticação HTTPS, partida real, build ARM ou
+pacote instalável.
 
 Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao dispositivo. Nenhum token foi solicitado.
 
@@ -37,6 +38,7 @@ Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao disp
 - [Seleção técnica da interface na Fase 1](docs/phase1-ui.md)
 - [Relatório de aceitação da Fase 1](docs/phase1-report.md)
 - [Relatório de aceitação da Fase 2](docs/phase2-report.md)
+- [Andamento da integração desktop — Fase 3](docs/phase3-desktop.md)
 
 ## Fontes congeladas
 
@@ -60,6 +62,9 @@ já compilada; detalhes e o digest da imagem estão em
 
 Execute `./scripts/test-go.sh` para `gofmt`, `go vet` e `go test -race` na
 toolchain Go oficial fixada por digest. Nenhuma ferramenta é instalada no host.
+
+`./scripts/build-desktop.sh` gera o bridge x86-64 sem cgo em `dist/desktop`;
+`./scripts/test-desktop-lifecycle.sh` testa socket e `SIGTERM` sem abrir HTTPS.
 
 ## Licença
 
