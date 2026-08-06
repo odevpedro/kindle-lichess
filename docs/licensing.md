@@ -18,6 +18,8 @@ Declara GNOME Chess/GNOME Games e inclui textos GPLv2/GPLv3/GFDL, mas sem licen�
 
 ## KOReader e bridge
 
-KOReader é AGPLv3. Plugin GPLv3+ distribuído separadamente é compatível; pacote combinado deve cumprir AGPL aplicável. Recomendação: novo repositório inteiro `GPL-3.0-or-later`; materializar LICENSE na Fase 1 junto do fork.
+KOReader é AGPLv3. Plugin GPLv3+ distribuído separadamente é compatível; pacote combinado deve cumprir AGPL aplicável. O repositório adota `GPL-3.0-or-later`, com o texto integral materializado em `LICENSE` na Fase 1.
+
+O snapshot auditado do Kochess fica fixado em `upstream/kochess` como submódulo de proveniência. Ele não entra no pacote instalável. Arquivos efetivamente adaptados precisam manter indicação de origem e autoria no cabeçalho, além do NOTICE.
 
 Antes de release: SBOM/licenças, NOTICE com autores/URLs/commits, source correspondente do Go, verificação asset a asset e prova de ausência de engine.

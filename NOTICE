@@ -1,4 +1,8 @@
-Kindle Lichess — Phase 0 research notice
+Kindle Lichess
+Copyright (C) 2026 Pedro Schmidt (odevpedro)
+Licensed under GPL-3.0-or-later. See LICENSE.
+
+Phase 0 research notice
 
 No third-party production source code was copied into this repository in Phase 0.
 
@@ -11,3 +15,8 @@ Sources inspected:
 - Lichess API and contributors: https://github.com/lichess-org/api
 
 A future Kochess fork must retain LICENSE, copyright notices, credits, Git ancestry, and artwork notices. arizati/chess.lua is not cleared for reuse because its repository has no explicit license grant.
+
+The Phase 1 source-of-truth snapshot is registered as the Git submodule
+`upstream/kochess`, pinned to commit
+`b9e05a8202083b58e290dc719890584919d81245`. It is provenance material and
+is excluded from the installable plugin package.

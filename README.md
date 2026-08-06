@@ -8,7 +8,7 @@ Projeto mantido por [odevpedro](https://github.com/odevpedro) (`pedrosschmidt2@g
 
 ## Estado
 
-**Fase 0 — auditoria e desenho concluídos em 2026-08-06.** Há somente documentação: nenhum plugin, bridge, binário ARM, token ou pacote instalável foi criado.
+**Fase 1 — mock da interface em andamento desde 2026-08-06.** A auditoria e o desenho da Fase 0 estão concluídos. Ainda não há bridge real, binário ARM, token ou pacote instalável.
 
 Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao dispositivo. Nenhum token foi solicitado.
 
@@ -43,4 +43,8 @@ Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao disp
 | [lichess-org/api](https://github.com/lichess-org/api) | `b2085f7df37481cdac98f385711843f94d2d67b6` |
 | [jhlywa/chess.js](https://github.com/jhlywa/chess.js) | `ca935bf44076e3d1c6e06922c7a9a2f28d959d2a` |
 
-A Fase 1 só deve começar após revisão desta entrega.
+A Fase 1 foi iniciada somente após a revisão e o versionamento desta entrega.
+
+## Licença
+
+O código próprio é distribuído sob `GPL-3.0-or-later`; consulte [LICENSE](LICENSE). Fontes reutilizadas mantêm seus próprios avisos e autoria conforme [NOTICE](NOTICE) e [documentação de licenciamento](docs/licensing.md).

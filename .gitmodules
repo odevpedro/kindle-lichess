@@ -1,0 +1,3 @@
+[submodule "upstream/kochess"]
+	path = upstream/kochess
+	url = https://github.com/bateast/kochess.git
