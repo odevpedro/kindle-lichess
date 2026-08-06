@@ -6,8 +6,9 @@ Branch: `phase/3-desktop-integration`.
 
 ## Resultado parcial
 
-O caminho de execução real está preparado e a autenticação inicial foi validada contra o
-Lichess. O modo padrão continua `mock`.
+O caminho de execução real está preparado, a autenticação inicial foi validada contra o
+Lichess e um desafio direto casual chegou ao estado de partida. O modo padrão continua
+`mock`.
 
 No menu Ferramentas → Kindle Lichess existem três ações:
 
@@ -54,15 +55,37 @@ O artefato fica em `dist/desktop/kindle-lichess-bridge` e é ignorado pelo Git.
 - busca de higiene sem token no repositório.
 - `GET /api/account` real aprovado para a conta de teste `testkindle`;
 - probe abre e fecha o bridge por Unix socket e exibe somente `id`, `username` e
-  `title` normalizados.
+  `title` normalizados;
+- `GET /api/stream/event` recebeu desafio Standard Rapid 10+0 casual;
+- `POST /api/challenge/{challengeId}/accept` retornou confirmação `command_ok`;
+- o `game_start` não foi observado na janela curta após a mutação, sem repetição do
+  `POST`;
+- a reconciliação abriu `GET /api/board/game/stream/{gameId}` e recebeu `gameFull` com
+  `initialFen=startpos`, lista de lances vazia, cor preta para `testkindle`, relógios em
+  600000 ms e estado `started`.
+
+O último caso valida uma regra importante do protocolo: após uma mutação confirmada ou
+ambígua, o cliente consulta a fonte de verdade e não repete automaticamente uma operação
+que pode já ter sido aplicada.
+
+## Ferramentas de validação real
+
+Os scripts abaixo recebem somente o caminho absoluto do token. Eles não imprimem nem
+copiam a credencial e seus diretórios temporários ficam sob `/tmp`:
+
+| Script | Operação | Saída persistida |
+|---|---|---|
+| `probe-account.sh` | consulta a conta | campos públicos normalizados |
+| `watch-challenge.sh` | observa o stream da conta | desafio normalizado |
+| `accept-challenge.sh` | aceita um ID explícito uma única vez | confirmação sanitizada |
+| `probe-game.sh` | abre o stream de uma partida | snapshot sanitizado |
 
 ## Pendente para concluir a fase
 
-1. abrir os streams da conta e da partida;
-2. receber e aceitar um desafio direto casual Standard Rapid;
-3. jogar e receber ao menos um lance;
-4. testar empate/desistência e reconexão;
-5. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
+1. jogar e receber ao menos um lance;
+2. testar empate/desistência e reconexão;
+3. validar o fluxo real completo na interface KOReader desktop;
+4. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
    relatório de aceitação da Fase 3.
 
 Não há autorização para build ARM, transferência ao Kindle ou alteração do dispositivo.
