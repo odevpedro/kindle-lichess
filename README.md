@@ -31,6 +31,7 @@ Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao disp
 - [Licenciamento](docs/licensing.md) e [segurança](docs/security.md)
 - [Backlog](docs/mvp-backlog.md), [riscos](docs/risks.md) e [testes](docs/test-plan.md)
 - [Implantação futura](docs/deployment.md)
+- [Seleção técnica da interface na Fase 1](docs/phase1-ui.md)
 
 ## Fontes congeladas
 

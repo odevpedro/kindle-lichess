@@ -20,3 +20,8 @@ The Phase 1 source-of-truth snapshot is registered as the Git submodule
 `upstream/kochess`, pinned to commit
 `b9e05a8202083b58e290dc719890584919d81245`. It is provenance material and
 is excluded from the installable plugin package.
+
+Kochess board interaction and artwork attribution:
+- Baptiste Fouques and Kochess contributors, GPL-3.0-or-later.
+- Chess-piece SVGs derived from work by Colin M.L. Burnett, GPL-2.0-or-later.
+- Source and modification mapping: `docs/phase1-ui.md`.
