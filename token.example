@@ -1,0 +1,4 @@
+# Copy this file to a private application-data directory outside the repository.
+# Replace the line below with a Lichess Personal Access Token scoped only to board:play.
+# The real file must be a regular file with mode 0600.
+REPLACE_WITH_BOARD_PLAY_TOKEN

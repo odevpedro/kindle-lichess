@@ -1,7 +1,9 @@
-# Authentication material
-token
-token.*
-!token.example
+# Authentication material kept at the repository root only. Source files such as
+# internal/auth/token.go must remain trackable.
+/token
+/token.*
+!/token.example
+*.lichess-token
 *.key
 *.pem
 
