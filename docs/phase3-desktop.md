@@ -6,8 +6,8 @@ Branch: `phase/3-desktop-integration`.
 
 ## Resultado parcial
 
-O caminho de execução real está preparado, mas nenhuma credencial foi consumida e nenhuma
-chamada foi feita ao Lichess. O modo padrão continua `mock`.
+O caminho de execução real está preparado e a autenticação inicial foi validada contra o
+Lichess. O modo padrão continua `mock`.
 
 No menu Ferramentas → Kindle Lichess existem três ações:
 
@@ -52,16 +52,17 @@ O artefato fica em `dist/desktop/kindle-lichess-bridge` e é ignorado pelo Git.
 - 8/8 pacotes com `go test -race`;
 - scripts validados por `bash -n`;
 - busca de higiene sem token no repositório.
+- `GET /api/account` real aprovado para a conta de teste `testkindle`;
+- probe abre e fecha o bridge por Unix socket e exibe somente `id`, `username` e
+  `title` normalizados.
 
 ## Pendente para concluir a fase
 
-1. disponibilizar uma credencial não exposta em arquivo local `0600`;
-2. testar somente `GET /api/account` e conferir o usuário da conta de teste;
-3. abrir os streams da conta e da partida;
-4. receber e aceitar um desafio direto casual Standard Rapid;
-5. jogar e receber ao menos um lance;
-6. testar empate/desistência e reconexão;
-7. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
+1. abrir os streams da conta e da partida;
+2. receber e aceitar um desafio direto casual Standard Rapid;
+3. jogar e receber ao menos um lance;
+4. testar empate/desistência e reconexão;
+5. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
    relatório de aceitação da Fase 3.
 
 Não há autorização para build ARM, transferência ao Kindle ou alteração do dispositivo.
