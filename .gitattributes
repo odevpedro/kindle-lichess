@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+*.go text eol=lf
+*.lua text eol=lf
+*.md text eol=lf
+*.ndjson text eol=lf
+*.sh text eol=lf

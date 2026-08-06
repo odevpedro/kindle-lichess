@@ -1,0 +1,26 @@
+# Authentication material
+token
+token.*
+!token.example
+*.key
+*.pem
+
+# Build and test outputs
+/dist/
+/bridge/bin/
+*.test
+*.prof
+coverage.out
+
+# Runtime artifacts
+*.log
+*.pid
+*.sock
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db

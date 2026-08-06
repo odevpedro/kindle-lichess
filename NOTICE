@@ -1,0 +1,13 @@
+Kindle Lichess — Phase 0 research notice
+
+No third-party production source code was copied into this repository in Phase 0.
+
+Sources inspected:
+- Kochess, Baptiste Fouques and contributors: https://github.com/bateast/kochess
+- chess.lua, Flynn/arizati: https://github.com/arizati/chess.lua
+- chess.js, Jeff Hlywa and contributors: https://github.com/jhlywa/chess.js
+- Exact Chess, jckhng and credited GNOME authors: https://github.com/jckhng/exact-chess
+- KOReader and contributors: https://github.com/koreader/koreader
+- Lichess API and contributors: https://github.com/lichess-org/api
+
+A future Kochess fork must retain LICENSE, copyright notices, credits, Git ancestry, and artwork notices. arizati/chess.lua is not cleared for reuse because its repository has no explicit license grant.
