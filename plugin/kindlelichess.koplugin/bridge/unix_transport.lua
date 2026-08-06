@@ -1,0 +1,87 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Copyright (C) 2026 Pedro Schmidt
+
+local bit = require("bit")
+local ffi = require("ffi")
+
+require("ffi/posix_h")
+ffi.cdef[[ static const unsigned KINDLE_LICHESS_SOCK_STREAM = 1; ]]
+
+local C = ffi.C
+local UnixTransport = {}
+UnixTransport.__index = UnixTransport
+
+local function would_block()
+    return ffi.errno() == C.EAGAIN
+end
+
+function UnixTransport.new(path)
+    return setmetatable({ path = assert(path, "socket path is required"), fd = -1 }, UnixTransport)
+end
+
+function UnixTransport:connect()
+    if self.fd >= 0 then return true end
+    if self.path:sub(1, 1) ~= "/" or #self.path >= 108 or self.path:find("\0", 1, true) then
+        return nil, "invalid_socket_path"
+    end
+    local fd = C.socket(C.AF_UNIX, C.KINDLE_LICHESS_SOCK_STREAM, 0)
+    if fd < 0 then return nil, "socket_unavailable" end
+    local address = ffi.new("struct sockaddr_un")
+    address.sun_family = C.AF_UNIX
+    ffi.copy(address.sun_path, self.path, #self.path)
+    if C.connect(fd, ffi.cast("const struct sockaddr *", address), ffi.sizeof(address)) ~= 0 then
+        C.close(fd)
+        return nil, "socket_unavailable"
+    end
+    local flags = C.fcntl(fd, C.F_GETFL, 0)
+    if flags < 0
+            or C.fcntl(fd, C.F_SETFL, bit.bor(flags, C.O_NONBLOCK)) ~= 0
+            or C.fcntl(fd, C.F_SETFD, C.FD_CLOEXEC) ~= 0 then
+        C.close(fd)
+        return nil, "socket_configuration_failed"
+    end
+    self.fd = fd
+    return true
+end
+
+function UnixTransport:read(maximum)
+    if self.fd < 0 then return nil, "socket_closed" end
+    local buffer = ffi.new("uint8_t[?]", maximum)
+    while true do
+        local count = C.read(self.fd, buffer, maximum)
+        if count > 0 then return ffi.string(buffer, count) end
+        if count == 0 then return nil, "eof" end
+        if ffi.errno() == C.EINTR then
+            -- Retry only interrupted syscalls.
+        elseif would_block() then
+            return "", "again"
+        else
+            return nil, "socket_read_failed"
+        end
+    end
+end
+
+function UnixTransport:write(data)
+    if self.fd < 0 then return nil, "socket_closed" end
+    if #data == 0 then return 0 end
+    while true do
+        local count = C.write(self.fd, data, #data)
+        if count >= 0 then return tonumber(count) end
+        if ffi.errno() == C.EINTR then
+            -- Retry only interrupted syscalls.
+        elseif would_block() then
+            return 0, "again"
+        else
+            return nil, "socket_write_failed"
+        end
+    end
+end
+
+function UnixTransport:close()
+    if self.fd >= 0 then
+        C.close(self.fd)
+        self.fd = -1
+    end
+end
+
+return UnixTransport
