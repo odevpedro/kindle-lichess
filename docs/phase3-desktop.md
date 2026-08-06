@@ -62,7 +62,16 @@ O artefato fica em `dist/desktop/kindle-lichess-bridge` e é ignorado pelo Git.
   `POST`;
 - a reconciliação abriu `GET /api/board/game/stream/{gameId}` e recebeu `gameFull` com
   `initialFen=startpos`, lista de lances vazia, cor preta para `testkindle`, relógios em
-  600000 ms e estado `started`.
+  600000 ms e estado `started`;
+- a primeira partida observada terminou com `status=aborted`, sem lances e sem vencedor,
+  antes de o jogador das brancas realizar o primeiro lance;
+- uma segunda partida casual trocou os lances `e2e4 b8c6 g1f3 b7b6` entre o bridge e
+  o navegador do oponente;
+- um novo processo do bridge reabriu o game stream depois dos dois primeiros lances e
+  recuperou `initialFen`, lista completa de lances, lado do jogador e relógios;
+- `POST /api/board/game/{gameId}/draw/yes` registrou `wdraw=true`; após a aceitação pelo
+  oponente, um novo snapshot confirmou `status=draw`, quatro meios-lances e nenhum
+  vencedor.
 
 O último caso valida uma regra importante do protocolo: após uma mutação confirmada ou
 ambígua, o cliente consulta a fonte de verdade e não repete automaticamente uma operação
@@ -79,13 +88,14 @@ copiam a credencial e seus diretórios temporários ficam sob `/tmp`:
 | `watch-challenge.sh` | observa o stream da conta | desafio normalizado |
 | `accept-challenge.sh` | aceita um ID explícito uma única vez | confirmação sanitizada |
 | `probe-game.sh` | abre o stream de uma partida | snapshot sanitizado |
+| `play-move.sh` | envia um único lance UCI explícito | confirmação e lances do servidor |
+| `game-action.sh` | envia uma ação explícita permitida | confirmação e estado reduzido |
 
 ## Pendente para concluir a fase
 
-1. jogar e receber ao menos um lance;
-2. testar empate/desistência e reconexão;
-3. validar o fluxo real completo na interface KOReader desktop;
-4. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
+1. testar desistência em uma nova partida casual;
+2. validar o fluxo real completo na interface KOReader desktop;
+3. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
    relatório de aceitação da Fase 3.
 
 Não há autorização para build ARM, transferência ao Kindle ou alteração do dispositivo.
