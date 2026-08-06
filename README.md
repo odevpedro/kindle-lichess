@@ -8,7 +8,7 @@ Projeto mantido por [odevpedro](https://github.com/odevpedro) (`pedrosschmidt2@g
 
 ## Estado
 
-**Fase 1 — mock da interface em andamento desde 2026-08-06.** A auditoria e o desenho da Fase 0 estão concluídos. Ainda não há bridge real, binário ARM, token ou pacote instalável.
+**Fase 1 — mock da interface em validação desde 2026-08-06.** A auditoria e o desenho da Fase 0 estão concluídos. O plugin já possui uma interface KOReader funcional com MockBridge e testes desktop; ainda não há bridge real, binário ARM, token ou pacote instalável.
 
 Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao dispositivo. Nenhum token foi solicitado.
 
@@ -45,6 +45,13 @@ Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao disp
 | [jhlywa/chess.js](https://github.com/jhlywa/chess.js) | `ca935bf44076e3d1c6e06922c7a9a2f28d959d2a` |
 
 A Fase 1 foi iniciada somente após a revisão e o versionamento desta entrega.
+
+## Testes da Fase 1
+
+Execute `./scripts/test.sh` para os testes unitários. Para incluir o carregamento no
+runtime desktop real do KOReader, aponte `KOREADER_SOURCE` para uma árvore KOReader
+já compilada; detalhes e o digest da imagem estão em
+[docs/phase1-ui.md](docs/phase1-ui.md).
 
 ## Licença
 

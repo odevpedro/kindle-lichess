@@ -49,4 +49,27 @@ O modelo não calcula cheque, mate, avaliação ou melhor jogada. Uma intenção
 
 ## Estado do ambiente desktop
 
-A árvore KOReader congelada contém testes Busted e o runner `./kodev test`, mas seus submódulos de build não estão inicializados. O host não possui `lua`, `luajit` ou `busted` no PATH. Nenhuma dependência foi instalada. Módulos puros serão testáveis também por um runner mínimo; o teste visual completo exigirá preparar o ambiente KOReader desktop em um gate separado.
+A árvore KOReader congelada foi compilada em ambiente isolado com a imagem oficial
+`koreader/koappimage`, fixada pelo digest
+`sha256:4416f7b137b1eda49eb486bbe00dd00a347f0f126a649bf75bf1edc8d4877828`.
+O commit validado é `koreader/koreader@aae92cebb0151acaf671189fce9875dbce7a2cfe`.
+Nenhum pacote foi instalado no host e todo o build ficou fora do repositório e do Kindle.
+
+O teste Busted do KOReader carrega metadados e `main.lua`, verifica o registro no menu
+Ferramentas, constrói e atualiza um tabuleiro de 600 pixels com os widgets reais e executa
+o ciclo do MockBridge até conexão, desafio, jogadas por toque, reconexão, empate e
+encerramento limpo. O runner puro cobre regras de reconstrução e cenários adicionais.
+
+Um smoke test adicional iniciou o aplicativo desktop com o perfil `kindle` (`600×800`,
+167 dpi) e o driver SDL sem janela. O carregador concluiu com `Plugin loaded kindlelichess`
+e permaneceu no loop principal até o encerramento controlado após cinco segundos. Isso
+valida descoberta e inicialização do plugin, mas não substitui inspeção visual humana.
+
+Para repetir os dois níveis em uma árvore desktop já compilada:
+
+```sh
+KOREADER_SOURCE=/caminho/absoluto/para/koreader ./scripts/test.sh
+```
+
+Sem `KOREADER_SOURCE`, o script executa apenas os testes unitários locais e informa
+explicitamente que o teste de integração foi ignorado.

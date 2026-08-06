@@ -9,6 +9,9 @@ local Selection = require("chess/selection")
 local Clock = require("chess/clock")
 local GameState = require("chess/game_state")
 local BoardGeometry = require("ui/board_geometry")
+local Controller = require("controller")
+local MockBridge = require("bridge/mock_bridge")
+local Protocol = require("bridge/protocol")
 
 local count = 0
 local function check(condition, message)
@@ -126,5 +129,103 @@ local reconnected_event = assert(game_state:apply_game_state({
 }))
 check(reconnected_event.kind == "reconnected" and #reconnected_event.dirty == 64,
     "reconnection discards transient state and redraws all")
+
+local protocol_ok, protocol_err = Protocol.validate_plugin({
+    v = 1, type = "move", requestId = "req-1", gameId = "game01", move = "e2e4",
+})
+check(protocol_ok and not protocol_err, "valid plugin protocol message")
+local _, secret_err = Protocol.validate_plugin({ v = 1, type = "connect", token = "forbidden" })
+check(secret_err == "secret_field_forbidden", "token fields never cross IPC")
+local _, version_err = Protocol.validate_server({ v = 2, type = "disconnected", reason = "test" })
+check(version_err == "unsupported_version", "unsupported protocol version")
+local _, unknown_err = Protocol.validate_server({ v = 1, type = "future_message" })
+check(unknown_err == "unknown_type", "unknown message type")
+
+local controller_events = {}
+local controller = Controller.new({
+    monotonic_now = function() return now end,
+    on_change = function(event) controller_events[#controller_events + 1] = event end,
+})
+local mock = MockBridge.new({ emit = function(message) return controller:handle(message) end })
+controller:attach_bridge(mock)
+controller:start()
+check(controller.view == "challenge" and controller.challenge.id == "mockchallenge01",
+    "mock connection delivers direct challenge")
+assert(controller:accept_challenge())
+check(controller.view == "game" and controller.game.id == "mockgame01", "accept opens gameFull")
+check(controller.game_state.position:piece_at("e2").type == "p", "game starts from server snapshot")
+controller:tap_square("e2")
+controller:tap_square("e4")
+piece(controller.game_state.position, "e4", "p", "w")
+piece(controller.game_state.position, "e5", "p", "b")
+check(controller.game_state.pending_move == nil and controller.game_state.position.turn == "w",
+    "mock confirms local move then opponent reply")
+controller:simulate_disconnect()
+check(controller.connection == "connected" and controller.view == "game",
+    "mock reconnect restores current game")
+assert(controller:offer_draw())
+check(controller.view == "result" and controller.status_text == "Empate", "draw reaches result screen")
+controller:close()
+check(controller.view == "closed" and not mock.alive, "closing UI stops mock bridge")
+
+local invalid_controller = Controller.new({ monotonic_now = function() return now end })
+invalid_controller.closed = false
+local invalid_ok, invalid_err = invalid_controller:handle({ v = 1, type = "connected", account = {} })
+check(not invalid_ok and invalid_err == "invalid_account", "malformed bridge message is recoverable")
+
+local decline_controller = Controller.new({ monotonic_now = function() return now end })
+local decline_mock = MockBridge.new({ emit = function(message) decline_controller:handle(message) end })
+decline_controller:attach_bridge(decline_mock)
+decline_controller:start()
+assert(decline_controller:decline_challenge())
+check(decline_controller.view == "lobby" and decline_controller.challenge == nil,
+    "declining challenge returns to lobby")
+decline_controller:close()
+
+local promotion_controller = Controller.new({ monotonic_now = function() return now end })
+local promotion_mock = MockBridge.new({ emit = function(message) promotion_controller:handle(message) end })
+assert(promotion_mock:set_scenario("promotion"))
+promotion_controller:attach_bridge(promotion_mock)
+promotion_controller:start()
+assert(promotion_controller:accept_challenge())
+check(promotion_controller:tap_square("a7").type == "selected", "mock promotion selects pawn")
+local promotion_prompt = promotion_controller:tap_square("a8")
+check(promotion_prompt.type == "promotion", "mock promotion requests piece")
+assert(promotion_controller:promote("a7", "a8", "q"))
+check(promotion_controller.view == "result" and promotion_controller.status_text == "Vitória",
+    "promotion scenario reaches victory")
+promotion_controller:close()
+
+local defeat_controller = Controller.new({ monotonic_now = function() return now end })
+local defeat_mock = MockBridge.new({ emit = function(message) defeat_controller:handle(message) end })
+defeat_controller:attach_bridge(defeat_mock)
+defeat_controller:start()
+assert(defeat_controller:accept_challenge())
+assert(defeat_mock:simulate_result("defeat"))
+check(defeat_controller.view == "result" and defeat_controller.status_text == "Derrota",
+    "mock defeat reaches result screen")
+defeat_controller:close()
+
+local abort_controller = Controller.new({ monotonic_now = function() return now end })
+local abort_mock = MockBridge.new({ emit = function(message) abort_controller:handle(message) end })
+abort_controller:attach_bridge(abort_mock)
+abort_controller:start()
+assert(abort_controller:accept_challenge())
+assert(abort_controller:abort())
+check(abort_controller.status_text == "Partida abortada", "mock abort is not reported as defeat")
+abort_controller:close()
+
+local queued, canceled = {}, {}
+local pending_mock = MockBridge.new({
+    emit = function() end,
+    schedule = function(_, callback) queued[#queued + 1] = callback end,
+    cancel = function(callback) canceled[callback] = true end,
+})
+pending_mock:start()
+assert(pending_mock:send({ v = 1, type = "connect" }))
+pending_mock:close()
+check(#queued == 2 and canceled[queued[1]] and canceled[queued[2]],
+    "closing mock cancels every scheduled event")
+check(next(pending_mock.scheduled) == nil, "closing mock leaves no pending task references")
 
 print(string.format("ok - %d checks", count))
