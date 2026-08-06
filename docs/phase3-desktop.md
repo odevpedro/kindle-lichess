@@ -71,7 +71,12 @@ O artefato fica em `dist/desktop/kindle-lichess-bridge` e é ignorado pelo Git.
   recuperou `initialFen`, lista completa de lances, lado do jogador e relógios;
 - `POST /api/board/game/{gameId}/draw/yes` registrou `wdraw=true`; após a aceitação pelo
   oponente, um novo snapshot confirmou `status=draw`, quatro meios-lances e nenhum
-  vencedor.
+  vencedor;
+- `POST /api/board/game/{gameId}/resign` enviado depois de somente um lance foi aceito,
+  mas o estado oficial terminou como `aborted`, sem vencedor;
+- em outra partida, depois de ambos os lados jogarem, o mesmo endpoint terminou com
+  `status=resign`, `winner=white` e preservou `e2e4 e7e5 g1f3`; um novo processo do
+  bridge confirmou independentemente o snapshot terminal.
 
 O último caso valida uma regra importante do protocolo: após uma mutação confirmada ou
 ambígua, o cliente consulta a fonte de verdade e não repete automaticamente uma operação
@@ -93,9 +98,8 @@ copiam a credencial e seus diretórios temporários ficam sob `/tmp`:
 
 ## Pendente para concluir a fase
 
-1. testar desistência em uma nova partida casual;
-2. validar o fluxo real completo na interface KOReader desktop;
-3. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
+1. validar o fluxo real completo na interface KOReader desktop;
+2. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
    relatório de aceitação da Fase 3.
 
 Não há autorização para build ARM, transferência ao Kindle ou alteração do dispositivo.
