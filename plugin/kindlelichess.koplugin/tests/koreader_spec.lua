@@ -36,7 +36,37 @@ describe("Kindle Lichess KOReader integration", function()
         plugin:addToMainMenu(menu_items)
         assert.equals("Kindle Lichess", menu_items.kindlelichess.text)
         assert.equals("more_tools", menu_items.kindlelichess.sorting_hint)
-        assert.is_function(menu_items.kindlelichess.callback)
+        assert.equals(3, #menu_items.kindlelichess.sub_item_table)
+        assert.equals("Open Kindle Lichess", menu_items.kindlelichess.sub_item_table[1].text)
+        assert.is_function(menu_items.kindlelichess.sub_item_table[1].callback)
+        assert.is_true(menu_items.kindlelichess.sub_item_table[2].checked_func())
+    end)
+
+    it("builds live mode from paths without reading authentication material in Lua", function()
+        local Controller = require("controller")
+        local KindleLichess = dofile(plugin_path .. "/main.lua")
+        local captured
+        local expected_bridge = {}
+        local plugin = KindleLichess:new{
+            path = "/opt/kindlelichess.koplugin",
+            data_dir = "/data/kindle-lichess",
+            bridge_mode = "live",
+            live_bridge_factory = function(options)
+                captured = options
+                return expected_bridge
+            end,
+            ui = { menu = { registerToMainMenu = function() end } },
+        }
+        local controller = Controller.new{ monotonic_now = function() return 1 end }
+        local bridge = plugin:_new_bridge(controller)
+
+        assert.equals(expected_bridge, bridge)
+        assert.equals("/opt/kindlelichess.koplugin/bin/kindle-lichess-bridge", captured.binary)
+        assert.equals("/data/kindle-lichess/token", captured.token_file)
+        assert.equals("/tmp/kindle-lichess.sock", captured.socket_path)
+        assert.is_function(captured.emit)
+        assert.is_nil(captured.token)
+        assert.is_nil(captured.authorization)
     end)
 
     it("builds and updates a 600-pixel e-ink board using real widgets", function()

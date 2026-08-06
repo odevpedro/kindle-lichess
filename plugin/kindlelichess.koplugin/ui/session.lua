@@ -137,11 +137,18 @@ function Session:_build_game()
 
     local moves_played = #controller.game_state.moves
     local finish_text = moves_played < 2 and _("Abort") or _("Resign")
-    local actions = self:_button_table({{
+    local action_row = {
         { text = _("Draw"), callback = function() controller:offer_draw() end },
-        { text = _("Reconnect"), callback = function() controller:simulate_disconnect() end },
-        { text = finish_text, callback = function() self:_confirm_finish(moves_played < 2) end },
-    }})
+    }
+    if controller.bridge and controller.bridge.simulate_disconnect then
+        action_row[#action_row + 1] = {
+            text = _("Reconnect"), callback = function() controller:simulate_disconnect() end,
+        }
+    end
+    action_row[#action_row + 1] = {
+        text = finish_text, callback = function() self:_confirm_finish(moves_played < 2) end,
+    }
+    local actions = self:_button_table({ action_row })
 
     self:_schedule_clock()
     return VerticalGroup:new{

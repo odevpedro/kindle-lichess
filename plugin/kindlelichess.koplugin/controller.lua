@@ -63,13 +63,13 @@ function Controller:start()
     self.closed = false
     self.view = "connecting"
     self.connection = "connecting"
-    self.status_text = "Conectando ao MockBridge…"
+    self.status_text = "Conectando…"
     self:_notify("view")
     self.bridge:start()
     local ok, err = self:_send({ type = "connect" })
     if not ok then
         self.connection = "offline"
-        self.status_text = "Falha ao iniciar mock: " .. tostring(err)
+        self.status_text = "Falha ao iniciar: " .. tostring(err)
         self:_notify("error", { code = err })
     end
 end
