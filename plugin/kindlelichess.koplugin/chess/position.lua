@@ -224,6 +224,20 @@ function Position:is_pseudo_legal(from, to, promotion, expected_color)
     return legal, legal and nil or "evidently_illegal"
 end
 
+function Position:pseudo_legal_destinations(from, expected_color)
+    local destinations = {}
+    for file = 1, 8 do
+        for rank = 1, 8 do
+            local to = coords_square(file, rank)
+            local legal, _, promotion_required = self:is_pseudo_legal(
+                from, to, nil, expected_color)
+            if legal or promotion_required then destinations[#destinations + 1] = to end
+        end
+    end
+    table.sort(destinations)
+    return destinations
+end
+
 function Position:apply_uci(uci)
     if type(uci) ~= "string" then return nil, "uci_not_string" end
     if #uci ~= 4 and #uci ~= 5 then return nil, "uci_bad_format" end

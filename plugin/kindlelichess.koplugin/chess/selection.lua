@@ -23,6 +23,11 @@ function Selection:set_pending(pending)
     if self.pending then self.selected = nil end
 end
 
+function Selection:available_destinations()
+    if self.pending or not self.selected or self.position.turn ~= self.player_color then return {} end
+    return self.position:pseudo_legal_destinations(self.selected, self.player_color)
+end
+
 function Selection:tap(square)
     if self.pending then return { type = "ignored", reason = "move_pending" } end
     if self.position.turn ~= self.player_color then

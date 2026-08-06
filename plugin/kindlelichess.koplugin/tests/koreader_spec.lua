@@ -144,8 +144,14 @@ describe("Kindle Lichess KOReader integration", function()
         board.squares.e2:onTapSquare()
         assert.equals("e2", tapped)
 
+        board:update(position, {}, "e2", nil, { "e3", "e4" })
+        assert.is_true(board.squares.e3.destination)
+        assert.is_true(board.squares.e4.destination)
+        assert.is_false(board.squares.e5.destination)
+        board:paintTo(framebuffer, 0, 0)
+
         local moved = assert(position:apply_uci("e2e4"))
-        board:update(position, moved.dirty, nil, { from = "e2", to = "e4" })
+        board:update(position, moved.dirty, nil, { from = "e2", to = "e4" }, {})
         assert.is_nil(board.squares.e2.piece)
         assert.equals("p", board.squares.e4.piece.type)
         assert.is_true(board.squares.e4.last_move)
@@ -157,7 +163,8 @@ describe("Kindle Lichess KOReader integration", function()
         local Controller = require("controller")
         local MockBridge = require("bridge/mock_bridge")
         local Session = require("ui/session")
-        local controller = Controller.new{ monotonic_now = function() return 10 end }
+        local now = 10
+        local controller = Controller.new{ monotonic_now = function() return now end }
         local bridge = MockBridge.new{
             emit = function(message) controller:handle(message) end,
         }
@@ -170,9 +177,21 @@ describe("Kindle Lichess KOReader integration", function()
         assert.equals("game", controller.view)
         assert.is_not_nil(session.board)
         assert.equals("w", session.board.orientation)
+        assert.equals(15, Session.clock_refresh_interval(600000))
+        assert.equals(5, Session.clock_refresh_interval(300000))
+        assert.equals(2, Session.clock_refresh_interval(60000))
+        local screen = require("device").screen
+        local framebuffer = require("ffi/blitbuffer").new(screen:getWidth(), screen:getHeight())
+        session:paintTo(framebuffer, 0, 0)
+        assert.equals("KindleTester  10:00", session.bottom_clock:getText())
+        now = 25
+        session.clock_callback()
+        assert.equals("KindleTester  09:45", session.bottom_clock:getText())
 
         session.board.squares.e2:onTapSquare()
         assert.equals("e2", controller.selection.selected)
+        assert.is_true(session.board.squares.e3.destination)
+        assert.is_true(session.board.squares.e4.destination)
         session.board.squares.e4:onTapSquare()
         assert.equals(2, #controller.game_state.moves)
         assert.equals("p", controller.game_state.position:piece_at("e4").type)
@@ -192,6 +211,7 @@ describe("Kindle Lichess KOReader integration", function()
         assert.is_false(bridge.alive)
         assert.is_nil(next(bridge.scheduled))
         session:free()
+        framebuffer:free()
     end)
 
     it("frames nonblocking Unix JSONL traffic without crashing on invalid input", function()

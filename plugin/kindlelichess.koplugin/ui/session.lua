@@ -11,6 +11,7 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local Geom = require("ui/geometry")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Screen = Device.screen
 local TextBoxWidget = require("ui/widget/textboxwidget")
@@ -19,6 +20,7 @@ local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 
 local Session = InputContainer:extend{
@@ -32,6 +34,48 @@ local Session = InputContainer:extend{
 local function text_widget(text, face, size)
     return TextWidget:new{ text = text, face = Font:getFace(face or "cfont", size or 22) }
 end
+
+local CenteredText = WidgetContainer:extend{
+    text = "",
+    face = nil,
+    width = nil,
+}
+
+function CenteredText:init()
+    self.label = TextWidget:new{ text = self.text, face = self.face, max_width = self.width }
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.label:getSize().h }
+    self[1] = self.label
+end
+
+function CenteredText:setText(text)
+    self.text = text
+    self.label:setText(text)
+end
+
+function CenteredText:getText()
+    return self.label.text
+end
+
+function CenteredText:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    local size = self.label:getSize()
+    self.label:paintTo(bb, x + math.floor((self.dimen.w - size.w) / 2), y)
+end
+
+local function centered_text(text, face, size)
+    return CenteredText:new{
+        text = text, face = Font:getFace(face or "cfont", size or 22),
+        width = math.floor(Screen:getWidth() * 0.98),
+    }
+end
+
+local function clock_refresh_interval(remaining)
+    if remaining <= 60000 then return 2 end
+    if remaining <= 300000 then return 5 end
+    return 15
+end
+
+Session.clock_refresh_interval = clock_refresh_interval
 
 function Session:init()
     assert(self.controller, "controller is required")
@@ -122,9 +166,9 @@ function Session:_build_game()
     local bottom_player = bottom_color == "w" and game.white or game.black
 
     local title = self:_title()
-    self.top_clock = text_widget(self:_player_label(top_player, top_color), "cfont", 24)
-    self.bottom_clock = text_widget(self:_player_label(bottom_player, bottom_color), "cfont", 24)
-    self.status_widget = text_widget(controller.status_text, "smallinfofont", 20)
+    self.top_clock = centered_text(self:_player_label(top_player, top_color), "cfont", 24)
+    self.bottom_clock = centered_text(self:_player_label(bottom_player, bottom_color), "cfont", 24)
+    self.status_widget = centered_text(controller.status_text, "smallinfofont", 20)
 
     local reserved = title:getSize().h + self.top_clock:getSize().h + self.bottom_clock:getSize().h
         + self.status_widget:getSize().h + Screen:scaleBySize(86)
@@ -136,6 +180,7 @@ function Session:_build_game()
         board_size = board_size,
         selected = controller.selection.selected,
         last_move = controller.last_move,
+        destinations = controller.selection:available_destinations(),
         on_tap = function(square) controller:tap_square(square) end,
     }
 
@@ -181,8 +226,9 @@ end
 
 function Session:_refresh_status()
     if self.status_widget then
+        local dirty = self.status_widget.dimen:copy()
         self.status_widget:setText(self.controller.status_text)
-        if self.status_widget.dimen then UIManager:setDirty(self, "ui", self.status_widget.dimen) end
+        UIManager:setDirty(self, "ui", dirty)
     end
 end
 
@@ -192,10 +238,12 @@ function Session:_refresh_clocks()
     local top_color = game.player_color == "w" and "b" or "w"
     local top_player = top_color == "w" and game.white or game.black
     local bottom_player = game.player_color == "w" and game.white or game.black
+    local top_dirty = self.top_clock.dimen:copy()
+    local bottom_dirty = self.bottom_clock.dimen:copy()
     self.top_clock:setText(self:_player_label(top_player, top_color))
     self.bottom_clock:setText(self:_player_label(bottom_player, game.player_color))
-    if self.top_clock.dimen then UIManager:setDirty(self, "ui", self.top_clock.dimen) end
-    if self.bottom_clock.dimen then UIManager:setDirty(self, "ui", self.bottom_clock.dimen) end
+    UIManager:setDirty(self, "ui", top_dirty)
+    UIManager:setDirty(self, "ui", bottom_dirty)
     self:_schedule_clock()
 end
 
@@ -205,7 +253,7 @@ function Session:_schedule_clock()
     local clock = self.controller.game_state.clock
     local active = self.controller.game_state.position.turn
     local remaining = clock:remaining(active) or 0
-    local interval = remaining <= 60000 and 5 or (remaining <= 300000 and 15 or 60)
+    local interval = clock_refresh_interval(remaining)
     UIManager:scheduleIn(interval, self.clock_callback)
 end
 
@@ -242,14 +290,16 @@ function Session:_controller_changed(event, payload)
     elseif event == "selected" or event == "deselected" or event == "rejected" or event == "move" then
         if self.board and self.controller.game_state then
             self.board:update(self.controller.game_state.position, {},
-                self.controller.selection.selected, self.controller.last_move)
+                self.controller.selection.selected, self.controller.last_move,
+                self.controller.selection:available_destinations())
         end
         self:_refresh_status()
     elseif event == "promotion" then
         self:_promotion(payload)
     elseif event == "game_state" and self.board then
         self.board:update(payload.position, payload.dirty,
-            self.controller.selection.selected, self.controller.last_move)
+            self.controller.selection.selected, self.controller.last_move,
+            self.controller.selection:available_destinations())
         self:_refresh_status()
         self:_refresh_clocks()
         self.full_refresh_counter = self.full_refresh_counter + 1

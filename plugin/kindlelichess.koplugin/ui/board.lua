@@ -12,9 +12,11 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local Screen = require("device").screen
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
+local Widget = require("ui/widget/widget")
 
 local BoardGeometry = require("ui/board_geometry")
 
@@ -24,12 +26,40 @@ local icon_path = plugin_path .. "/icons/"
 
 local piece_names = { p = "P", n = "N", b = "B", r = "R", q = "Q", k = "K" }
 
+local MoveIndicator = Widget:extend{
+    size = 64,
+    capture = false,
+}
+
+function MoveIndicator:getSize()
+    return Geom:new{ x = 0, y = 0, w = self.size, h = self.size }
+end
+
+function MoveIndicator:paintTo(bb, x, y)
+    local center = math.floor(self.size / 2)
+    if self.capture then
+        local radius = math.max(4, math.floor(self.size * 0.40))
+        local width = math.max(2, math.floor(self.size * 0.045))
+        bb:paintCircle(x + center, y + center, radius, Blitbuffer.COLOR_GRAY, width)
+    else
+        local radius = math.max(3, math.floor(self.size * 0.105))
+        bb:paintCircle(x + center, y + center, radius, Blitbuffer.COLOR_GRAY)
+    end
+end
+
+local function square_set(squares)
+    local result = {}
+    for _, square in ipairs(squares or {}) do result[square] = true end
+    return result
+end
+
 local Square = InputContainer:extend{
     size = 64,
     square = nil,
     piece = nil,
     selected = false,
     last_move = false,
+    destination = false,
     callback = nil,
     show_parent = nil,
 }
@@ -54,10 +84,17 @@ function Square:_build()
         file = self:_icon(), width = image_size, height = image_size,
         alpha = true, is_icon = true,
     }
+    local layers = OverlapGroup:new{
+        dimen = Geom:new{ w = inner, h = inner },
+        CenterContainer:new{ dimen = Geom:new{ w = inner, h = inner }, image },
+    }
+    if self.destination then
+        table.insert(layers, MoveIndicator:new{ size = inner, capture = self.piece ~= nil })
+    end
     self.frame = FrameContainer:new{
         margin = 0, padding = 0, bordersize = border,
         background = self:_background(),
-        CenterContainer:new{ dimen = Geom:new{ w = inner, h = inner }, image },
+        layers,
     }
     self[1] = self.frame
     if self.dimen then
@@ -79,12 +116,14 @@ function Square:onTapSquare()
     return true
 end
 
-function Square:set_state(piece, selected, last_move)
+function Square:set_state(piece, selected, last_move, destination)
     local unchanged_piece = (not self.piece and not piece)
         or (self.piece and piece and self.piece.type == piece.type and self.piece.color == piece.color)
-    if unchanged_piece and self.selected == selected and self.last_move == last_move then return end
+    if unchanged_piece and self.selected == selected and self.last_move == last_move
+            and self.destination == destination then return end
     local dirty = self.dimen
-    self.piece, self.selected, self.last_move = piece, selected, last_move
+    self.piece, self.selected, self.last_move, self.destination =
+        piece, selected, last_move, destination
     if self[1] then self[1]:free() end
     self:_build()
     if dirty and dirty.w > 0 then UIManager:setDirty(self.show_parent or self, "ui", dirty) end
@@ -97,6 +136,7 @@ local Board = FrameContainer:extend{
     on_tap = nil,
     selected = nil,
     last_move = nil,
+    destinations = nil,
     bordersize = 0,
     padding = 0,
     margin = 0,
@@ -107,6 +147,7 @@ function Board:init()
     local square_size = math.floor(self.board_size / 8)
     self.board_size = square_size * 8
     self.squares = {}
+    self.destinations = square_set(self.destinations)
     local rows = VerticalGroup:new{}
     for row = 1, 8 do
         local columns = HorizontalGroup:new{}
@@ -119,6 +160,7 @@ function Board:init()
                 selected = square == self.selected,
                 last_move = self.last_move
                     and (square == self.last_move.from or square == self.last_move.to),
+                destination = self.destinations[square] == true,
                 callback = function(tapped) if self.on_tap then self.on_tap(tapped) end end,
                 show_parent = self,
             }
@@ -130,20 +172,25 @@ function Board:init()
     self[1] = rows
 end
 
-function Board:update(position, dirty_squares, selected, last_move)
+function Board:update(position, dirty_squares, selected, last_move, destinations)
     local refresh = {}
     for _, square in ipairs(dirty_squares or {}) do refresh[square] = true end
     if self.selected then refresh[self.selected] = true end
     if selected then refresh[selected] = true end
     if self.last_move then refresh[self.last_move.from], refresh[self.last_move.to] = true, true end
     if last_move then refresh[last_move.from], refresh[last_move.to] = true, true end
+    for square in pairs(self.destinations or {}) do refresh[square] = true end
+    local destination_set = square_set(destinations)
+    for square in pairs(destination_set) do refresh[square] = true end
 
-    self.position, self.selected, self.last_move = position, selected, last_move
+    self.position, self.selected, self.last_move, self.destinations =
+        position, selected, last_move, destination_set
     for square in pairs(refresh) do
         local widget = self.squares[square]
         if widget then
             widget:set_state(position:piece_at(square), square == selected,
-                last_move and (square == last_move.from or square == last_move.to) or false)
+                last_move and (square == last_move.from or square == last_move.to) or false,
+                destination_set[square] == true)
         end
     end
 end

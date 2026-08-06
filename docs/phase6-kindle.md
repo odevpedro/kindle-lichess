@@ -64,7 +64,7 @@ esse caminho contra `DataStorage:getFullDataDir()` antes de iniciar o processo.
 
 Validação local:
 
-- Lua: 64/64 checks;
+- Lua: 66/66 checks;
 - runtime oficial KOReader: 9/9 testes;
 - Go com `gofmt`, `go vet` e `go test -race`: 8/8 pacotes;
 - duas construções consecutivas do pacote: hash idêntico.
@@ -73,8 +73,8 @@ Pacote corrigido:
 
 | Item | Valor |
 |---|---|
-| tamanho | 2.603.941 bytes |
-| SHA-256 | `1b48fd78f7f38d66cf9bac88fd64e4f56f2f1f1ebd2b262f6675fe79098a6e3a` |
+| tamanho | 2.604.691 bytes |
+| SHA-256 | `cff5e47d2e7bdc1d09c04adfbf98f72e8b457fe2c969389e8efb8874fde6f2fd` |
 | SHA-256 do bridge ARM inalterado | `77c1ef20f10385190000a8b1938ef882298690110ef754256075fc69c6289d40` |
 
 ### Atualização mínima instalada
@@ -100,8 +100,21 @@ A revisão `2013e34` foi transferida separadamente para `/tmp` e validada pelo S
 `/tmp/kindle-lichess-backup-2013e34/`. Depois de `sync`, 33/33 hashes foram novamente
 aprovados e o rollback não foi acionado.
 
+## Refinamentos visuais preparados
+
+- marcador circular cinza em cada destino vazio aceito pela validação local;
+- anel cinza ao redor de peças que podem ser capturadas;
+- marcadores removidos ao desmarcar, enviar jogada ou trocar a posição do servidor;
+- relógios encapsulados em regiões fixas para refresh parcial independente de toque;
+- atualização a cada 15 s acima de 5 min, 5 s entre 1–5 min e 2 s abaixo de 1 min;
+- nenhum refresh por segundo e nenhuma engine/análise introduzida.
+
+Testes da revisão: 66/66 checks Lua, 9/9 testes no runtime KOReader, pintura dos
+marcadores em blitbuffer 600×600 e avanço visual do relógio sem evento de toque.
+
 ## Pendências
 
+- validar marcadores de destino e refresh parcial dos relógios no KT4;
 - repetir o fluxo MockBridge até o tabuleiro;
 - executar ciclo de vida ARM nativo e medir RSS;
 - somente então testar HTTPS/conta real com token efêmero.

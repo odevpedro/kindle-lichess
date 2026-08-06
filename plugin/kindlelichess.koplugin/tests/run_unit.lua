@@ -65,10 +65,13 @@ check(illegal:to_fen() == Position.START_FEN, "rejected move must not mutate pos
 local selection_position = assert(Position.from_fen("startpos"))
 local selection = Selection.new(selection_position, "w")
 check(selection:tap("e2").type == "selected", "select own piece")
+local pawn_destinations = table.concat(selection:available_destinations(), " ")
+check(pawn_destinations == "e3 e4", "selected pawn exposes local destinations")
 local intent = selection:tap("e4")
 check(intent.type == "move" and intent.uci == "e2e4", "emit UCI intent")
 piece(selection_position, "e2", "p", "w")
 check(selection_position:piece_at("e4") == nil, "intent must not mutate confirmed board")
+check(#selection:available_destinations() == 0, "destinations clear after move intent")
 
 local promotion_position = assert(Position.from_fen(promotion_fen))
 local promotion_selection = Selection.new(promotion_position, "w")
