@@ -8,7 +8,7 @@ Projeto mantido por [odevpedro](https://github.com/odevpedro) (`pedrosschmidt2@g
 
 ## Estado
 
-**Fase 4 — build ARMv7 isolado concluído em 2026-08-06.** O plugin
+**Fase 5 — auditoria pré-instalação concluída em 2026-08-06.** O plugin
 possui interface KOReader funcional com MockBridge; bridge Go, Board API, Unix socket e
 adaptador Lua foram implementados e testados. Uma conta de teste completou desafios
 casuais, lances bilaterais, reconexão, empate e desistência pela API oficial. O bridge
@@ -42,6 +42,7 @@ O token privado permanece fora do repositório em arquivo local `0600`.
 - [Relatório de aceitação da Fase 2](docs/phase2-report.md)
 - [Andamento da integração desktop — Fase 3](docs/phase3-desktop.md)
 - [Relatório do build ARMv7 — Fase 4](docs/phase4-report.md)
+- [Auditoria pré-instalação — Fase 5](docs/phase5-preinstall.md)
 
 ## Fontes congeladas
 
