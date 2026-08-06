@@ -17,6 +17,11 @@ local KindleLichess = WidgetContainer:extend{
     session = nil,
 }
 
+local function absolute_path(root, path)
+    if path:sub(1, 1) == "/" then return path end
+    return root:gsub("/+$", "") .. "/" .. path
+end
+
 function KindleLichess:onDispatcherRegisterActions()
     Dispatcher:registerAction("kindlelichess_start", {
         category = "none", event = "KindleLichessStart",
@@ -48,7 +53,7 @@ function KindleLichess:addToMainMenu(menu_items)
             },
             {
                 text = _("Lichess test account"),
-                help_text = _("Uses the local 0600 token file and the official Board API."),
+                help_text = _("Uses a temporary 0600 token file and the official Board API."),
                 checked_func = function() return self:_bridge_mode() == "live" end,
                 callback = function()
                     self.bridge_mode = nil
@@ -78,14 +83,14 @@ function KindleLichess:_new_bridge(controller)
         return MockBridge.new(callbacks)
     end
 
-    local data_dir = self.data_dir or (DataStorage:getDataDir() .. "/kindle-lichess")
     local data_root = self.data_root or DataStorage:getFullDataDir()
+    local plugin_root = absolute_path(data_root, self.path)
     local binary = self.bridge_binary
         or G_reader_settings:readSetting("kindlelichess_bridge_binary")
-        or (self.path .. "/bin/kindle-lichess-bridge")
+        or (plugin_root .. "/bin/kindle-lichess-bridge")
     local token_file = self.token_file
         or G_reader_settings:readSetting("kindlelichess_token_file")
-        or (data_dir .. "/token")
+        or "/tmp/kindle-lichess-token"
     local ca_file = self.ca_file
         or G_reader_settings:readSetting("kindlelichess_ca_file")
         or (data_root .. "/data/ca-bundle.crt")

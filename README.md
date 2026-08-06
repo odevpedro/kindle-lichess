@@ -8,15 +8,15 @@ Projeto mantido por [odevpedro](https://github.com/odevpedro) (`pedrosschmidt2@g
 
 ## Estado
 
-**Fase 5 — auditoria pré-instalação concluída em 2026-08-06.** O plugin
+**Fase 6 — validação controlada no KT4 em andamento desde 2026-08-06.** O plugin
 possui interface KOReader funcional com MockBridge; bridge Go, Board API, Unix socket e
 adaptador Lua foram implementados e testados. Uma conta de teste completou desafios
 casuais, lances bilaterais, reconexão, empate e desistência pela API oficial. O bridge
-ARMv7 estático executou sob QEMU, criou/removeu socket e encerrou com `SIGTERM`. Execução
-nativa, kernel e consumo real no KT4 permanecem pendentes de autorização.
+ARMv7 estático executou sob QEMU. O preflight confirmou kernel 4.1.15, ARMv7 hard-float,
+rootfs somente leitura, memória e espaço no KT4. Gates de upload temporário e instalação
+do plugin foram aprovados; execução ARM nativa e consumo real ainda estão pendentes.
 
-Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao dispositivo.
-O token privado permanece fora do repositório em arquivo local `0600`.
+O token privado permanece fora do repositório e do armazenamento persistente do Kindle.
 
 ## Decisões
 
@@ -43,6 +43,7 @@ O token privado permanece fora do repositório em arquivo local `0600`.
 - [Andamento da integração desktop — Fase 3](docs/phase3-desktop.md)
 - [Relatório do build ARMv7 — Fase 4](docs/phase4-report.md)
 - [Auditoria pré-instalação — Fase 5](docs/phase5-preinstall.md)
+- [Validação no Kindle — Fase 6](docs/phase6-kindle.md)
 
 ## Fontes congeladas
 

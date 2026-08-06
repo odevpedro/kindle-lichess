@@ -2,7 +2,7 @@
 
 ## Token
 
-Inexistente nas Fases 0–2. Na Fase 3: manual, fora de chat/Git, arquivo configurável modo exato 0600. Bridge recusa ausente, symlink inesperado, owner errado ou permissões abertas. Token não entra em argv, IPC, fixture, erro/log e vai somente a `https://lichess.org`; Authorization não segue redirect a outro host. `token.example` terá só placeholder.
+Inexistente nas Fases 0–2. Na Fase 3: manual, fora de chat/Git, arquivo configurável modo exato 0600. O preflight do KT4 confirmou que o filesystem FSP de `/mnt/us` sintetiza permissões abertas e não pode hospedar esse arquivo. No protótipo privado, o token é transferido por sessão para `/tmp/kindle-lichess-token`, com `umask 077` e modo verificado como 0600; não persiste no armazenamento do usuário e é removido ao terminar. Bridge recusa ausente, symlink inesperado, owner errado ou permissões abertas. Token não entra em argv, IPC, fixture, erro/log e vai somente a `https://lichess.org`; Authorization não segue redirect a outro host. `token.example` tem só placeholder.
 
 ## IPC/processo
 

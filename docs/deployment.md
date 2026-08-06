@@ -5,10 +5,12 @@ Não há implantação na Fase 0.
 ## Permitido
 
 - plugin/bridge: `/mnt/us/koreader/plugins/kindlelichess.koplugin`;
-- dados: subdiretório próprio `kindlelichess` resolvido por `DataStorage:getDataDir()`;
-- temporários/socket: `/tmp`.
+- dados persistentes não secretos: subdiretório próprio resolvido por `DataStorage:getDataDir()`;
+- temporários/socket/token privado da sessão: `/tmp`.
 
-O caminho de dados real do KT4 será consultado somente com autorização, nunca presumido/hardcoded. Token futuro fica em dados próprios, não no plugin versionado.
+O filesystem FSP de `/mnt/us` não preserva modo 0600. O token do protótipo privado não
+será persistido nele: ficará em `/tmp/kindle-lichess-token` somente durante a sessão e
+será removido ao encerrar. O caminho contém apenas o token, nunca entra no Git ou pacote.
 
 O plugin somente lê o CA bundle já fornecido pelo KOReader em `data/ca-bundle.crt`; não o
 copia, substitui ou modifica.

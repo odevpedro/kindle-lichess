@@ -1,6 +1,6 @@
 # Fase 5 — auditoria pré-instalação
 
-Status: concluída, aguardando autorização do preflight somente leitura.
+Status: concluída; Gates 1–3 executados e registrados na Fase 6.
 Data: 2026-08-06.
 Branch: `phase/5-preinstall-audit`.
 
@@ -83,8 +83,7 @@ Antes do modo real:
 
 Somente depois de MockBridge e ciclo ARM aprovados:
 
-- dados próprios: `/mnt/us/koreader/kindle-lichess/`;
-- token real: `/mnt/us/koreader/kindle-lichess/token`, modo `0600`.
+- token efêmero: `/tmp/kindle-lichess-token`, modo real `0600` no tmpfs.
 
 O CA bundle será somente lido de `/mnt/us/koreader/data/ca-bundle.crt`. Nenhuma operação
 escreve em `/etc`, `/usr`, `/var/local`, `/opt`, `/root`, `/mnt/us/kmc`, `chess.koplugin`,
@@ -130,7 +129,8 @@ sha256sum -c MANIFEST.sha256
 
 ## Gate 3 — cópia do plugin novo
 
-KOReader deverá estar fechado por ação do usuário. O destino deve continuar inexistente.
+O destino deve continuar inexistente. Como o SSH é fornecido pelo KOReader, ele permanece
+aberto durante a cópia e é reiniciado manualmente somente depois de `sync`.
 
 ```sh
 ssh -p 2222 root@<KINDLE_IP> '
@@ -175,19 +175,18 @@ rm -f /tmp/kindle-lichess-placeholder-token
 
 ## Gate 5 — token real e modo online
 
-Somente após nova confirmação, o token será transferido sem aparecer em argumento ou
-stdout:
+Somente após nova confirmação, o token será transferido para tmpfs sem aparecer em
+argumento ou stdout:
 
 ```sh
-ssh -p 2222 root@<KINDLE_IP> 'umask 077; mkdir -p /mnt/us/koreader/kindle-lichess'
 scp -P 2222 /home/hoper/.local/share/kindle-lichess/token \
-    root@<KINDLE_IP>:/mnt/us/koreader/kindle-lichess/token
+    root@<KINDLE_IP>:/tmp/kindle-lichess-token
 ssh -p 2222 root@<KINDLE_IP> \
-    'chmod 0600 /mnt/us/koreader/kindle-lichess/token'
+    'chmod 0600 /tmp/kindle-lichess-token; test "$(stat -c %a /tmp/kindle-lichess-token)" = 600'
 ```
 
 O usuário selecionará o modo real na interface. Logs serão aceitos somente após
-sanitização por allowlist.
+sanitização por allowlist. O token será removido de `/tmp` ao terminar o teste.
 
 ## Reversão
 
@@ -204,6 +203,7 @@ if pidof kindle-lichess-bridge >/dev/null 2>&1; then
     exit 1
 fi
 rm -f /tmp/kindle-lichess.sock /tmp/kindle-lichess-native-test.sock
+rm -f /tmp/kindle-lichess-token /tmp/kindle-lichess-placeholder-token
 rm -rf /mnt/us/koreader/plugins/kindlelichess.koplugin
 rm -rf /tmp/kindle-lichess-install
 rm -f /tmp/kindlelichess-koplugin-armv7.tar.gz
@@ -211,19 +211,10 @@ sync
 '
 ```
 
-Depois do token real, acrescentar somente:
-
-```sh
-ssh -p 2222 root@<KINDLE_IP> \
-    'rm -rf /mnt/us/koreader/kindle-lichess'
-```
-
-A remoção do plugin e dos dados próprios é definitiva, mas todo código pode ser
-recuperado do tarball/Git e o token pode ser recriado no Lichess. Nenhum arquivo original
-do KOReader exige rollback.
+A remoção do plugin é definitiva, mas todo código pode ser recuperado do tarball/Git.
+Nenhum arquivo original do KOReader exige rollback.
 
 ## Autorização
 
-Nenhum comando SSH/SCP acima foi executado. A autorização deve identificar o IP do KT4 e
-liberar primeiro apenas o Gate 1 somente leitura. Transferência exige autorização
-separada após a revisão do preflight.
+Os Gates 1–3 foram autorizados separadamente e executados. Resultados, desvios observados
+e correções estão em `docs/phase6-kindle.md`.

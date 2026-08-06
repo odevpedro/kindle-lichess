@@ -66,14 +66,15 @@ end
 
 function Session:_simple_content()
     local controller = self.controller
+    self.status_widget = TextBoxWidget:new{
+        text = controller.status_text, width = math.floor(Screen:getWidth() * 0.82),
+        face = Font:getFace("infofont", 26), alignment = "center",
+    }
     local group = VerticalGroup:new{
         align = "center",
         self:_title(),
         VerticalSpan:new{ width = Screen:scaleBySize(30) },
-        TextBoxWidget:new{
-            text = controller.status_text, width = math.floor(Screen:getWidth() * 0.82),
-            face = Font:getFace("infofont", 26), alignment = "center",
-        },
+        self.status_widget,
     }
 
     if controller.view == "challenge" and controller.challenge then
@@ -86,10 +87,13 @@ function Session:_simple_content()
             face = Font:getFace("cfont", 24), alignment = "center",
         })
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(24) })
-        table.insert(group, self:_button_table({{
-            { text = _("Decline"), callback = function() controller:decline_challenge() end },
-            { text = _("Accept"), callback = function() controller:accept_challenge() end },
-        }}))
+        self.challenge_actions = self:_button_table({{
+            { id = "decline", text = _("Decline"),
+                callback = function() controller:decline_challenge() end },
+            { id = "accept", text = _("Accept"),
+                callback = function() controller:accept_challenge() end },
+        }})
+        table.insert(group, self.challenge_actions)
     elseif controller.view == "result" then
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(32) })
         table.insert(group, text_widget(controller.status_text, "tfont", 34))
@@ -168,6 +172,7 @@ function Session:_rebuild()
     UIManager:unschedule(self.clock_callback)
     if self[1] then self[1]:free() end
     self.board, self.top_clock, self.bottom_clock, self.status_widget = nil, nil, nil, nil
+    self.challenge_actions = nil
     local content = self.controller.view == "game" and self.controller.game_state
         and self:_build_game() or self:_simple_content()
     self[1] = self:_root(content)
@@ -231,7 +236,10 @@ end
 
 function Session:_controller_changed(event, payload)
     if self.closing then return end
-    if event == "selected" or event == "deselected" or event == "rejected" or event == "move" then
+    if event == "status" then
+        -- Do not free and rebuild the button tree from inside its own tap callback.
+        self:_refresh_status()
+    elseif event == "selected" or event == "deselected" or event == "rejected" or event == "move" then
         if self.board and self.controller.game_state then
             self.board:update(self.controller.game_state.position, {},
                 self.controller.selection.selected, self.controller.last_move)

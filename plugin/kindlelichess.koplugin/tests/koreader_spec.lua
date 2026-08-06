@@ -49,9 +49,9 @@ describe("Kindle Lichess KOReader integration", function()
         local expected_bridge = {}
         local plugin = KindleLichess:new{
             path = "/opt/kindlelichess.koplugin",
-            data_dir = "/data/kindle-lichess",
             data_root = "/koreader",
             bridge_mode = "live",
+            token_file = "/data/kindle-lichess/token",
             live_bridge_factory = function(options)
                 captured = options
                 return expected_bridge
@@ -69,6 +69,58 @@ describe("Kindle Lichess KOReader integration", function()
         assert.is_function(captured.emit)
         assert.is_nil(captured.token)
         assert.is_nil(captured.authorization)
+    end)
+
+    it("resolves a relative plugin path and defaults to a protected temporary token", function()
+        local Controller = require("controller")
+        local KindleLichess = dofile(plugin_path .. "/main.lua")
+        local captured
+        local plugin = KindleLichess:new{
+            path = "plugins/kindlelichess.koplugin",
+            data_root = "/mnt/us/koreader",
+            bridge_mode = "live",
+            live_bridge_factory = function(options)
+                captured = options
+                return {}
+            end,
+            ui = { menu = { registerToMainMenu = function() end } },
+        }
+        local controller = Controller.new{ monotonic_now = function() return 1 end }
+        plugin:_new_bridge(controller)
+
+        assert.equals("/mnt/us/koreader/plugins/kindlelichess.koplugin/bin/kindle-lichess-bridge",
+            captured.binary)
+        assert.equals("/tmp/kindle-lichess-token", captured.token_file)
+        assert.equals("/mnt/us/koreader/data/ca-bundle.crt", captured.ca_file)
+    end)
+
+    it("does not rebuild the challenge widget tree from inside the Accept callback", function()
+        local Controller = require("controller")
+        local Session = require("ui/session")
+        local sent
+        local controller = Controller.new{ monotonic_now = function() return 10 end }
+        controller:attach_bridge({
+            send = function(_, message)
+                sent = message
+                return true
+            end,
+        })
+        controller.closed = false
+        controller.view = "challenge"
+        controller.connection = "connected"
+        controller.status_text = "Desafio recebido"
+        controller.challenge = { id = "challenge01", challenger = { username = "Opponent" } }
+        local session = Session:new{ controller = controller }
+        local original_root = session[1]
+        local accept = session.challenge_actions.button_by_id.accept
+
+        accept.callback()
+
+        assert.equals(original_root, session[1])
+        assert.equals("Aceitando desafio…", session.status_widget.text)
+        assert.equals("accept_challenge", sent.type)
+        assert.equals("challenge01", sent.challengeId)
+        session:free()
     end)
 
     it("builds and updates a 600-pixel e-ink board using real widgets", function()
