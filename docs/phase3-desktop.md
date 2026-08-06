@@ -1,7 +1,8 @@
 # Fase 3 — integração real no computador
 
-Status: em andamento.  
-Início: 2026-08-06.  
+Status: concluída com ressalva.
+Início: 2026-08-06.
+Encerramento: 2026-08-06.
 Branch: `phase/3-desktop-integration`.
 
 ## Resultado parcial
@@ -96,10 +97,32 @@ copiam a credencial e seus diretórios temporários ficam sob `/tmp`:
 | `play-move.sh` | envia um único lance UCI explícito | confirmação e lances do servidor |
 | `game-action.sh` | envia uma ação explícita permitida | confirmação e estado reduzido |
 
-## Pendente para concluir a fase
+## Ressalva do gate
 
-1. validar o fluxo real completo na interface KOReader desktop;
-2. registrar logs sanitizados, revogar a credencial de teste se necessário e emitir o
-   relatório de aceitação da Fase 3.
+O emulador gráfico em Docker/X11 apresentou renderização por software lenta e não foi
+usado como critério humano. Uma tentativa não versionada de smoke live dentro do Busted
+travou ao iniciar o subprocesso e foi encerrada por timeout; nenhum código desse harness
+permaneceu no repositório. O ponto exato `KOReader -> fork/exec -> bridge` ainda não foi
+comprovado em execução real, embora processo, socket, UI e API tenham passado em camadas
+separadas.
 
-Não há autorização para build ARM, transferência ao Kindle ou alteração do dispositivo.
+O risco será tratado no dispositivo somente após build ARM e auditoria pré-instalação:
+
+1. carregar a interface com MockBridge;
+2. validar início e encerramento do binário sem token/rede;
+3. confirmar criação e remoção do socket;
+4. somente então selecionar o modo real.
+
+O token foi mantido fora do Git e não foi revogado porque ainda será usado pela conta de
+teste privada. Não há logs brutos persistidos.
+
+## Gate para a Fase 4
+
+- desafio, partida, lances, reconexão, empate e desistência reais: aprovados;
+- testes Lua, KOReader e Go: aprovados;
+- higiene de credenciais: aprovada;
+- risco residual de subprocesso no runtime: documentado e não ocultado;
+- build ARM: autorizado apenas em ambiente isolado, sem transferência ao dispositivo.
+
+O build ARM isolado pode começar. Não há autorização para transferência ao Kindle ou
+alteração do dispositivo.

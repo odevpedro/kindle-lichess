@@ -8,13 +8,15 @@ Projeto mantido por [odevpedro](https://github.com/odevpedro) (`pedrosschmidt2@g
 
 ## Estado
 
-**Fase 3 — integração desktop em andamento desde 2026-08-06.** O plugin possui interface
-KOReader funcional com MockBridge; o bridge Go, Board API, Unix socket e adaptador Lua
-foram implementados e testados localmente. O executável desktop e a seleção explícita de
-modo real estão prontos. Ainda não houve autenticação HTTPS, partida real, build ARM ou
-pacote instalável.
+**Fase 3 — integração real no computador concluída com ressalva em 2026-08-06.** O plugin
+possui interface KOReader funcional com MockBridge; bridge Go, Board API, Unix socket e
+adaptador Lua foram implementados e testados. Uma conta de teste completou desafios
+casuais, lances bilaterais, reconexão, empate e desistência pela API oficial. O harness
+gráfico desktop não foi adotado como gate porque seu `fork/exec` travou sob Docker/X11;
+esse risco permanece explícito para o teste controlado no dispositivo.
 
-Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao dispositivo. Nenhum token foi solicitado.
+Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao dispositivo.
+O token privado permanece fora do repositório em arquivo local `0600`.
 
 ## Decisões
 
