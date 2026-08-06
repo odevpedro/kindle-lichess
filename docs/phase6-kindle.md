@@ -1,6 +1,6 @@
 # Fase 6 — validação no Kindle KT4
 
-Status: refinamentos instalados, aguardando validação visual no KT4.
+Status: Gate ARM nativo aprovado; integração online preparada, aguardando validação pela interface.
 Data: 2026-08-06.
 Branch: `phase/6-kindle-validation`.
 
@@ -120,8 +120,65 @@ com backup em `/tmp/kindle-lichess-backup-a8723aa/`. Somente `chess/position.lua
 `chess/selection.lua`, `ui/board.lua`, `ui/session.lua` e `MANIFEST.sha256` foram
 substituídos. Depois de `sync`, 33/33 hashes foram aprovados e não houve rollback.
 
+## Legalidade completa e MockBridge contínuo
+
+A validação local deixou de aceitar apenas movimentos pseudo-legais. O redutor agora
+mapeia casas atacadas, simula o lance antes de confirmá-lo e rejeita captura do rei,
+rei em xeque, peça cravada, roque saindo/passando/terminando em xeque e en passant que
+expõe o próprio rei. FEN exige exatamente um rei de cada cor. Os marcadores mostram
+somente destinos legais.
+
+O MockBridge preserva as cinco respostas iniciais quando forem legais e depois escolhe
+deterministicamente o primeiro lance legal, sem avaliação, pontuação ou busca. Assim o
+cenário não abandona depois da abertura e não executa resposta fixa ilegal após xeque.
+Isso permanece restrito ao mock; a build online continua sem engine.
+
+Validação local da revisão:
+
+- 88/88 verificações Lua;
+- 9/9 testes no runtime KOReader;
+- 8/8 pacotes Go com `go test -race`;
+- scripts e diff sem erros;
+- duas construções idênticas do pacote.
+
+Pacote instalado:
+
+| Item | Valor |
+|---|---|
+| tamanho | 2.605.957 bytes |
+| SHA-256 | `0bc4608e86614617a9ecab7fbfc9729129768fc27e2720718feba72d1baa187b` |
+| bridge ARM | `77c1ef20f10385190000a8b1938ef882298690110ef754256075fc69c6289d40` |
+| backup | `/tmp/kindle-lichess-backup-legal-0bc4608e/` |
+
+Somente `bridge/mock_bridge.lua`, `chess/position.lua`, `chess/selection.lua` e
+`MANIFEST.sha256` foram substituídos no dispositivo. O staging e o destino passaram
+33/33 hashes; nenhum rollback foi necessário.
+
+## Gate 4 — execução ARM nativa
+
+O bridge instalado executou diretamente no KT4 usando socket e credencial fictícios
+exclusivos em `/tmp`, sem cliente conectado e portanto sem HTTPS. Resultado observado:
+
+- processo em estado sleeping, 6 threads;
+- `VmRSS`: 3.396 KiB;
+- `VmSize`/`VmPeak`: 571.228 KiB de espaço virtual reservado;
+- `SIGTERM` encerrou com sucesso;
+- socket e credencial fictícia foram removidos.
+
+O valor virtual não representa RAM residente; o RSS observado é o indicador de pressão
+real de memória. Ainda será medido novamente com os streams da conta e da partida.
+
+## Preparação do modo real
+
+O token autorizado foi transferido sem impressão para `/tmp/kindle-lichess-token`,
+validado como arquivo regular não simbólico, proprietário `root`, modo 0600 e tamanho
+limitado. Ele não integra o pacote, Git ou armazenamento persistente e será removido ao
+final da sessão. Nenhuma requisição HTTPS foi iniciada durante essa preparação.
+
 ## Pendências
 
-- validar marcadores de destino e refresh parcial dos relógios no KT4;
-- executar ciclo de vida ARM nativo e medir RSS;
-- somente então testar HTTPS/conta real com token efêmero.
+- reiniciar manualmente somente o KOReader para carregar a nova revisão;
+- autenticar `GET /api/account` pela interface;
+- receber e aceitar desafio direto casual Rapid;
+- validar movimentos bilaterais, relógios, resultado e reconexão no KT4;
+- medir RSS com os dois streams e remover o token efêmero ao final.

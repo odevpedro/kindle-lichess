@@ -12,11 +12,13 @@ Projeto mantido por [odevpedro](https://github.com/odevpedro) (`pedrosschmidt2@g
 possui interface KOReader funcional com MockBridge; bridge Go, Board API, Unix socket e
 adaptador Lua foram implementados e testados. Uma conta de teste completou desafios
 casuais, lances bilaterais, reconexão, empate e desistência pela API oficial. O bridge
-ARMv7 estático executou sob QEMU. O preflight confirmou kernel 4.1.15, ARMv7 hard-float,
-rootfs somente leitura, memória e espaço no KT4. Gates de upload temporário e instalação
-do plugin foram aprovados; execução ARM nativa e consumo real ainda estão pendentes.
+ARMv7 estático executou sob QEMU e nativamente no KT4 com cerca de 3,3 MiB de RSS. O
+preflight confirmou kernel 4.1.15, ARMv7 hard-float, rootfs somente leitura, memória e
+espaço no KT4. O plugin instalado valida legalidade completa dos lances e o modo real
+está preparado para o primeiro teste HTTPS pela interface.
 
-O token privado permanece fora do repositório e do armazenamento persistente do Kindle.
+O token privado permanece fora do repositório e do armazenamento persistente do Kindle;
+no dispositivo ele existe apenas temporariamente em `/tmp` com modo 0600.
 
 ## Decisões
 

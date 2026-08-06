@@ -88,6 +88,7 @@ function Position.from_fen(fen)
     if #ranks ~= 8 then return nil, "fen_rank_count" end
 
     local board = {}
+    local king_count = { w = 0, b = 0 }
     for fen_rank = 1, 8 do
         local file = 1
         for token in ranks[fen_rank]:gmatch(".") do
@@ -100,6 +101,7 @@ function Position.from_fen(fen)
                 if not valid_piece[lower] or file > 8 then return nil, "fen_bad_piece" end
                 local color = token == lower and "b" or "w"
                 board[coords_square(file, 9 - fen_rank)] = { type = lower, color = color }
+                if lower == "k" then king_count[color] = king_count[color] + 1 end
                 file = file + 1
             end
         end
@@ -107,6 +109,7 @@ function Position.from_fen(fen)
     end
 
     if fields[2] ~= "w" and fields[2] ~= "b" then return nil, "fen_bad_turn" end
+    if king_count.w ~= 1 or king_count.b ~= 1 then return nil, "fen_bad_kings" end
     if not valid_castling(fields[3]) then return nil, "fen_bad_castling" end
     if fields[4] ~= "-" then
         local _, ep_rank = square_coords(fields[4])
@@ -158,6 +161,67 @@ function Position:_path_clear(from_file, from_rank, to_file, to_rank)
     return true
 end
 
+function Position:is_square_attacked(square, by_color)
+    local file, rank = square_coords(square)
+    if not file or (by_color ~= "w" and by_color ~= "b") then return false end
+
+    local pawn_direction = by_color == "w" and 1 or -1
+    local pawn_rank = rank - pawn_direction
+    for _, pawn_file in ipairs({ file - 1, file + 1 }) do
+        local pawn = self.board[coords_square(pawn_file, pawn_rank)]
+        if pawn and pawn.color == by_color and pawn.type == "p" then return true end
+    end
+
+    local knight_offsets = {
+        { -2, -1 }, { -2, 1 }, { -1, -2 }, { -1, 2 },
+        { 1, -2 }, { 1, 2 }, { 2, -1 }, { 2, 1 },
+    }
+    for _, offset in ipairs(knight_offsets) do
+        local knight = self.board[coords_square(file + offset[1], rank + offset[2])]
+        if knight and knight.color == by_color and knight.type == "n" then return true end
+    end
+
+    for file_delta = -1, 1 do
+        for rank_delta = -1, 1 do
+            if file_delta ~= 0 or rank_delta ~= 0 then
+                local king = self.board[coords_square(file + file_delta, rank + rank_delta)]
+                if king and king.color == by_color and king.type == "k" then return true end
+            end
+        end
+    end
+
+    local directions = {
+        { 1, 0, r = true, q = true }, { -1, 0, r = true, q = true },
+        { 0, 1, r = true, q = true }, { 0, -1, r = true, q = true },
+        { 1, 1, b = true, q = true }, { 1, -1, b = true, q = true },
+        { -1, 1, b = true, q = true }, { -1, -1, b = true, q = true },
+    }
+    for _, direction in ipairs(directions) do
+        local scan_file, scan_rank = file + direction[1], rank + direction[2]
+        while scan_file >= 1 and scan_file <= 8 and scan_rank >= 1 and scan_rank <= 8 do
+            local attacker = self.board[coords_square(scan_file, scan_rank)]
+            if attacker then
+                if attacker.color == by_color and direction[attacker.type] then return true end
+                break
+            end
+            scan_file, scan_rank = scan_file + direction[1], scan_rank + direction[2]
+        end
+    end
+    return false
+end
+
+function Position:king_square(color)
+    for square, piece in pairs(self.board) do
+        if piece.color == color and piece.type == "k" then return square end
+    end
+end
+
+function Position:is_in_check(color)
+    local king = self:king_square(color)
+    if not king then return nil, "missing_king" end
+    return self:is_square_attacked(king, color == "w" and "b" or "w")
+end
+
 function Position:is_pseudo_legal(from, to, promotion, expected_color)
     local from_file, from_rank = square_coords(from)
     local to_file, to_rank = square_coords(to)
@@ -187,7 +251,12 @@ function Position:is_pseudo_legal(from, to, promotion, expected_color)
         elseif file_delta == 0 and rank_delta == 2 * direction and from_rank == start_rank and not target then
             legal = self.board[coords_square(from_file, from_rank + direction)] == nil
         elseif abs_file == 1 and rank_delta == direction then
-            legal = target ~= nil or to == self.en_passant
+            if target then
+                legal = true
+            elseif to == self.en_passant then
+                local captured = self.board[coords_square(to_file, from_rank)]
+                legal = captured and captured.type == "p" and captured.color ~= piece.color
+            end
         end
         if legal and to_rank == promotion_rank and not promotion then
             return false, "promotion_required", true
@@ -224,33 +293,7 @@ function Position:is_pseudo_legal(from, to, promotion, expected_color)
     return legal, legal and nil or "evidently_illegal"
 end
 
-function Position:pseudo_legal_destinations(from, expected_color)
-    local destinations = {}
-    for file = 1, 8 do
-        for rank = 1, 8 do
-            local to = coords_square(file, rank)
-            local legal, _, promotion_required = self:is_pseudo_legal(
-                from, to, nil, expected_color)
-            if legal or promotion_required then destinations[#destinations + 1] = to end
-        end
-    end
-    table.sort(destinations)
-    return destinations
-end
-
-function Position:apply_uci(uci)
-    if type(uci) ~= "string" then return nil, "uci_not_string" end
-    if #uci ~= 4 and #uci ~= 5 then return nil, "uci_bad_format" end
-    local from, to = uci:sub(1, 2), uci:sub(3, 4)
-    local promotion = #uci == 5 and uci:sub(5, 5) or nil
-    if not Position.is_square(from) or not Position.is_square(to)
-            or (promotion and not valid_promotion[promotion]) then
-        return nil, "uci_bad_format"
-    end
-
-    local legal, reason = self:is_pseudo_legal(from, to, promotion)
-    if not legal then return nil, reason end
-
+function Position:_apply_unchecked(from, to, promotion, uci)
     local piece = self.board[from]
     local target = self.board[to]
     local from_file, from_rank = square_coords(from)
@@ -260,7 +303,6 @@ function Position:apply_uci(uci)
 
     if piece.type == "p" and from_file ~= to_file and not target and to == self.en_passant then
         local captured_square = coords_square(to_file, from_rank)
-        if not self.board[captured_square] then return nil, "missing_en_passant_pawn" end
         self.board[captured_square] = nil
         dirty[#dirty + 1] = captured_square
         is_capture = true
@@ -300,6 +342,66 @@ function Position:apply_uci(uci)
     self.moves[#self.moves + 1] = uci
     table.sort(dirty)
     return dirty
+end
+
+function Position:is_legal(from, to, promotion, expected_color)
+    local pseudo_legal, reason, promotion_required = self:is_pseudo_legal(
+        from, to, promotion, expected_color)
+    if not pseudo_legal and not promotion_required then return false, reason end
+
+    local piece = self.board[from]
+    local target = self.board[to]
+    if target and target.type == "k" then return false, "king_capture_forbidden" end
+
+    local opponent = piece.color == "w" and "b" or "w"
+    local from_file, from_rank = square_coords(from)
+    local to_file = square_coords(to)
+    if piece.type == "k" and math.abs(to_file - from_file) == 2 then
+        if self:is_square_attacked(from, opponent) then return false, "castle_from_check" end
+        local transit = coords_square(from_file + (to_file > from_file and 1 or -1), from_rank)
+        local transit_position = self:clone()
+        transit_position.board[from] = nil
+        transit_position.board[transit] = copy_piece(piece)
+        if transit_position:is_square_attacked(transit, opponent) then
+            return false, "castle_through_check"
+        end
+    end
+
+    local simulated_promotion = promotion or (promotion_required and "q" or nil)
+    local simulated = self:clone()
+    simulated:_apply_unchecked(from, to, simulated_promotion,
+        from .. to .. (simulated_promotion or ""))
+    if simulated:is_in_check(piece.color) then return false, "leaves_king_in_check" end
+    if promotion_required then return false, "promotion_required", true end
+    return true
+end
+
+function Position:legal_destinations(from, expected_color)
+    local destinations = {}
+    for file = 1, 8 do
+        for rank = 1, 8 do
+            local to = coords_square(file, rank)
+            local legal, _, promotion_required = self:is_legal(from, to, nil, expected_color)
+            if legal or promotion_required then destinations[#destinations + 1] = to end
+        end
+    end
+    table.sort(destinations)
+    return destinations
+end
+
+function Position:apply_uci(uci)
+    if type(uci) ~= "string" then return nil, "uci_not_string" end
+    if #uci ~= 4 and #uci ~= 5 then return nil, "uci_bad_format" end
+    local from, to = uci:sub(1, 2), uci:sub(3, 4)
+    local promotion = #uci == 5 and uci:sub(5, 5) or nil
+    if not Position.is_square(from) or not Position.is_square(to)
+            or (promotion and not valid_promotion[promotion]) then
+        return nil, "uci_bad_format"
+    end
+
+    local legal, reason = self:is_legal(from, to, promotion)
+    if not legal then return nil, reason end
+    return self:_apply_unchecked(from, to, promotion, uci)
 end
 
 function Position.reconstruct(initial_fen, moves)

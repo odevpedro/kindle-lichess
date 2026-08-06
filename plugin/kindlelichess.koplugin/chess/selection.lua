@@ -25,7 +25,7 @@ end
 
 function Selection:available_destinations()
     if self.pending or not self.selected or self.position.turn ~= self.player_color then return {} end
-    return self.position:pseudo_legal_destinations(self.selected, self.player_color)
+    return self.position:legal_destinations(self.selected, self.player_color)
 end
 
 function Selection:tap(square)
@@ -55,7 +55,7 @@ function Selection:tap(square)
     end
 
     self.selected = nil
-    local legal, reason, promotion_required = self.position:is_pseudo_legal(from, square, nil, self.player_color)
+    local legal, reason, promotion_required = self.position:is_legal(from, square, nil, self.player_color)
     if promotion_required then
         return { type = "promotion", from = from, to = square }
     end
@@ -66,7 +66,7 @@ function Selection:tap(square)
 end
 
 function Selection:promote(from, to, piece)
-    local legal, reason = self.position:is_pseudo_legal(from, to, piece, self.player_color)
+    local legal, reason = self.position:is_legal(from, to, piece, self.player_color)
     if not legal then return { type = "rejected", from = from, to = to, reason = reason } end
     return { type = "move", from = from, to = to, uci = from .. to .. piece }
 end

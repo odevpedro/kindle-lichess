@@ -17,6 +17,22 @@ local replies = {
 local function immediate(_, callback) callback() end
 local function no_cancel() end
 
+-- Deterministic mock-only responder: generates legal moves but performs no evaluation or search.
+local function first_legal_move(position)
+    for file = string.byte("a"), string.byte("h") do
+        for rank = 1, 8 do
+            local from = string.char(file) .. tostring(rank)
+            local piece = position:piece_at(from)
+            if piece and piece.color == position.turn then
+                for _, to in ipairs(position:legal_destinations(from, position.turn)) do
+                    local promotion = piece.type == "p" and (to:sub(2, 2) == "1" or to:sub(2, 2) == "8")
+                    return from .. to .. (promotion and "q" or "")
+                end
+            end
+        end
+    end
+end
+
 function MockBridge.new(options)
     options = options or {}
     return setmetatable({
@@ -75,7 +91,7 @@ function MockBridge:set_scenario(name)
     if name ~= "standard" and name ~= "promotion" then return nil, "unknown_scenario" end
     self.scenario = name
     self.moves = {}
-    self.initial_fen = name == "promotion" and "4k3/P7/8/8/8/8/7p/4K3 w - - 0 1" or "startpos"
+    self.initial_fen = name == "promotion" and "8/P3k3/8/8/8/8/7p/4K3 w - - 0 1" or "startpos"
     self.status = "started"
     return true
 end
@@ -143,16 +159,29 @@ function MockBridge:send(message)
         self.moves[#self.moves + 1] = message.move
         self.wtime = math.max(0, self.wtime - 1000 + 5000)
         self:_emit({ v = 1, type = "game_state", gameId = GAME_ID, state = self:_state() }, 0.1)
-        local reply = self.scenario == "standard" and replies[#self.moves] or nil
-        if reply then
-            self:_later(0.5, function()
-                local reply_position = assert(Position.reconstruct(self.initial_fen, self.moves))
-                assert(reply_position:apply_uci(reply))
-                self.moves[#self.moves + 1] = reply
-                self.btime = math.max(0, self.btime - 1200 + 5000)
-                self:_emit({ v = 1, type = "game_state", gameId = GAME_ID,
-                    state = self:_state() })
-            end)
+        if self.scenario == "standard" then
+            local reply_position = assert(Position.reconstruct(self.initial_fen, self.moves))
+            local reply = replies[#self.moves]
+            if reply then
+                local probe = reply_position:clone()
+                if not probe:apply_uci(reply) then reply = nil end
+            end
+            reply = reply or first_legal_move(reply_position)
+            if reply then
+                self:_later(0.5, function()
+                    local current = assert(Position.reconstruct(self.initial_fen, self.moves))
+                    assert(current:apply_uci(reply))
+                    self.moves[#self.moves + 1] = reply
+                    self.btime = math.max(0, self.btime - 1200 + 5000)
+                    self:_emit({ v = 1, type = "game_state", gameId = GAME_ID,
+                        state = self:_state() })
+                end)
+            else
+                local checked = reply_position:is_in_check(reply_position.turn)
+                self:_later(0.5, function()
+                    self:_finish(checked and "mate" or "stalemate", checked and "w" or nil)
+                end)
+            end
         elseif self.scenario == "promotion" then
             self:_finish("mate", "w")
         end

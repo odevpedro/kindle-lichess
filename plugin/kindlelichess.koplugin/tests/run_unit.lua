@@ -52,7 +52,7 @@ check(castled:piece_at("e1") == nil and castled:piece_at("h1") == nil, "castling
 check(not castled.castling:find("K", 1, true) and not castled.castling:find("Q", 1, true),
     "white castling rights removed")
 
-local promotion_fen = "4k3/P7/8/8/8/8/7p/4K3 w - - 0 1"
+local promotion_fen = "8/P3k3/8/8/8/8/7p/4K3 w - - 0 1"
 local promoted = assert(Position.reconstruct(promotion_fen, "a7a8q h2h1n"))
 piece(promoted, "a8", "q", "w")
 piece(promoted, "h1", "n", "b")
@@ -61,6 +61,33 @@ local illegal = assert(Position.from_fen("startpos"))
 local _, illegal_reason = illegal:apply_uci("e2e5")
 check(illegal_reason == "evidently_illegal", "obvious illegal move must be rejected")
 check(illegal:to_fen() == Position.START_FEN, "rejected move must not mutate position")
+
+local king_capture = assert(Position.from_fen("4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1"))
+local _, king_capture_reason = king_capture:apply_uci("e2e8")
+check(king_capture_reason == "king_capture_forbidden", "the opposing king can never be captured")
+piece(king_capture, "e8", "k", "b")
+
+local pinned = assert(Position.from_fen("4r1k1/8/8/8/8/8/4R3/4K3 w - - 0 1"))
+local _, pinned_reason = pinned:apply_uci("e2d2")
+check(pinned_reason == "leaves_king_in_check", "a pinned piece cannot expose its king")
+local pinned_destinations = table.concat(pinned:legal_destinations("e2", "w"), " ")
+check(not pinned_destinations:find("d2", 1, true), "illegal pinned destination is not highlighted")
+
+local king_into_check = assert(Position.from_fen("4k3/8/8/8/8/8/8/r3K3 w - - 0 1"))
+local _, king_check_reason = king_into_check:apply_uci("e1d1")
+check(king_check_reason == "leaves_king_in_check", "king cannot move onto an attacked square")
+
+local castle_through_check = assert(Position.from_fen("4k3/8/8/8/8/8/5r2/4K2R w K - 0 1"))
+local _, castle_reason = castle_through_check:apply_uci("e1g1")
+check(castle_reason == "castle_through_check", "castling through check is forbidden")
+
+local en_passant_pin = assert(Position.from_fen("7k/8/8/4KPpr/8/8/8/8 w - g6 0 1"))
+local _, en_passant_pin_reason = en_passant_pin:apply_uci("f5g6")
+check(en_passant_pin_reason == "leaves_king_in_check", "en passant cannot expose the king")
+
+local check_evasion = assert(Position.from_fen("4k3/8/8/8/8/8/4r3/4K3 w - - 0 1"))
+check(assert(check_evasion:apply_uci("e1e2")), "king may legally capture an undefended checking piece")
+piece(check_evasion, "e2", "k", "w")
 
 local selection_position = assert(Position.from_fen("startpos"))
 local selection = Selection.new(selection_position, "w")
@@ -92,6 +119,7 @@ check(Clock.format(54900) == "00:55", "clock rounds display upward")
 local bad_fens = {
     "", "8/8/8/8/8/8/8 w - - 0 1", "8/8/8/8/8/8/8/8 x - - 0 1",
     "8/8/8/8/8/8/8/8 w KK - 0 1", "8/8/8/8/8/8/8/8 w - e4 0 1",
+    "8/8/8/8/8/8/8/4K3 w - - 0 1", "4k3/8/8/8/8/8/4K3/4K3 w - - 0 1",
 }
 for _, fen in ipairs(bad_fens) do
     local value = Position.from_fen(fen)
@@ -163,6 +191,16 @@ piece(controller.game_state.position, "e4", "p", "w")
 piece(controller.game_state.position, "e5", "p", "b")
 check(controller.game_state.pending_move == nil and controller.game_state.position.turn == "w",
     "mock confirms local move then opponent reply")
+local continued_moves = {
+    { "g1", "f3" }, { "f1", "c4" }, { "d2", "d3" },
+    { "c2", "c3" }, { "b1", "d2" },
+}
+for _, move in ipairs(continued_moves) do
+    check(controller:tap_square(move[1]).type == "selected", "mock continuation selects " .. move[1])
+    check(controller:tap_square(move[2]).type == "move", "mock continuation moves to " .. move[2])
+end
+check(#controller.game_state.moves == 12 and controller.game_state.position.turn == "w",
+    "mock continues with a legal reply after its scripted opening")
 controller:simulate_disconnect()
 check(controller.connection == "connected" and controller.view == "game",
     "mock reconnect restores current game")
