@@ -213,6 +213,13 @@ local invalid_controller = Controller.new({ monotonic_now = function() return no
 invalid_controller.closed = false
 local invalid_ok, invalid_err = invalid_controller:handle({ v = 1, type = "connected", account = {} })
 check(not invalid_ok and invalid_err == "invalid_account", "malformed bridge message is recoverable")
+assert(invalid_controller:handle({
+    v = 1, type = "error", code = "lichess_rejected",
+    message = "Bridge request failed", fatal = false,
+}))
+check(invalid_controller.status_text
+        == "Lichess recusou a ação; o desafio pode ter expirado (lichess_rejected)",
+    "controller exposes a useful API error instead of a generic bridge failure")
 
 local decline_controller = Controller.new({ monotonic_now = function() return now end })
 local decline_mock = MockBridge.new({ emit = function(message) decline_controller:handle(message) end })

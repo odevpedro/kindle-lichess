@@ -9,6 +9,22 @@ local Selection = require("chess/selection")
 local Controller = {}
 Controller.__index = Controller
 
+local error_messages = {
+    lichess_rejected = "Lichess recusou a ação; o desafio pode ter expirado",
+    auth_unauthorized = "Token recusado pelo Lichess",
+    auth_forbidden = "Token sem permissão board:play",
+    not_found = "Desafio ou partida não encontrado",
+    rate_limited = "Muitas solicitações; aguarde e tente novamente",
+    network_timeout = "Tempo de resposta do Lichess esgotado",
+    network_error = "Falha de rede ao acessar o Lichess",
+    not_connected = "Bridge ainda não conectado",
+}
+
+local function error_status(message)
+    local text = error_messages[message.code] or message.message or "Falha no bridge"
+    return text .. " (" .. tostring(message.code or "unknown") .. ")"
+end
+
 local function last_move(moves)
     local value
     for move in tostring(moves or ""):gmatch("%S+") do value = move end
@@ -287,7 +303,7 @@ function Controller:handle(message)
         end
         self:_notify("game_finish", message)
     elseif kind == "error" then
-        self.status_text = message.message
+        self.status_text = error_status(message)
         if message.fatal then self.connection = "offline" end
         self:_notify("error", message)
     elseif kind == "opponent_gone" then
