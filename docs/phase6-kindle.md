@@ -1,6 +1,6 @@
 # Fase 6 — validação no Kindle KT4
 
-Status: correção instalada, aguardando repetição visual do MockBridge.
+Status: refinamentos instalados, aguardando validação visual no KT4.
 Data: 2026-08-06.
 Branch: `phase/6-kindle-validation`.
 
@@ -112,9 +112,16 @@ aprovados e o rollback não foi acionado.
 Testes da revisão: 66/66 checks Lua, 9/9 testes no runtime KOReader, pintura dos
 marcadores em blitbuffer 600×600 e avanço visual do relógio sem evento de toque.
 
+### Refinamentos instalados
+
+A revisão `a8723aa` foi transferida para `/tmp`, validada pelo SHA-256
+`cff5e47d2e7bdc1d09c04adfbf98f72e8b457fe2c969389e8efb8874fde6f2fd` e instalada
+com backup em `/tmp/kindle-lichess-backup-a8723aa/`. Somente `chess/position.lua`,
+`chess/selection.lua`, `ui/board.lua`, `ui/session.lua` e `MANIFEST.sha256` foram
+substituídos. Depois de `sync`, 33/33 hashes foram aprovados e não houve rollback.
+
 ## Pendências
 
 - validar marcadores de destino e refresh parcial dos relógios no KT4;
-- repetir o fluxo MockBridge até o tabuleiro;
 - executar ciclo de vida ARM nativo e medir RSS;
 - somente então testar HTTPS/conta real com token efêmero.
