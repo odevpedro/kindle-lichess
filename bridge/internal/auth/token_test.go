@@ -73,3 +73,12 @@ func TestTokenFormattingNeverLeaksValue(t *testing.T) {
 		t.Fatalf("token leaked through formatting: %s", formatted)
 	}
 }
+
+func TestLoadTokenErrorsNeverExposePath(t *testing.T) {
+	t.Parallel()
+	canary := "secret-token-path-canary"
+	_, err := LoadToken(filepath.Join(t.TempDir(), canary))
+	if err == nil || strings.Contains(err.Error(), canary) {
+		t.Fatalf("error exposed token path: %v", err)
+	}
+}

@@ -37,7 +37,7 @@ func LoadToken(path string) (Token, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return Token{}, ErrTokenMissing
 		}
-		return Token{}, fmt.Errorf("read token metadata: %w", err)
+		return Token{}, ErrTokenInvalid
 	}
 	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
 		return Token{}, ErrTokenPermissions
@@ -45,13 +45,13 @@ func LoadToken(path string) (Token, error) {
 
 	file, err := os.Open(path)
 	if err != nil {
-		return Token{}, fmt.Errorf("open token: %w", err)
+		return Token{}, ErrTokenInvalid
 	}
 	defer file.Close()
 
 	content, err := io.ReadAll(io.LimitReader(file, maxTokenBytes+1))
 	if err != nil {
-		return Token{}, fmt.Errorf("read token: %w", err)
+		return Token{}, ErrTokenInvalid
 	}
 	if len(content) > maxTokenBytes {
 		return Token{}, ErrTokenInvalid

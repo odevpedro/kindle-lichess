@@ -27,12 +27,14 @@ type socketIdentity struct {
 }
 
 type Server struct {
-	path     string
-	identity socketIdentity
-	listener *net.UnixListener
-	mutex    sync.Mutex
-	client   *net.UnixConn
-	closed   bool
+	path      string
+	identity  socketIdentity
+	listener  *net.UnixListener
+	mutex     sync.Mutex
+	client    *net.UnixConn
+	closed    bool
+	closeDone chan struct{}
+	closeErr  error
 }
 
 func Listen(path string) (*Server, error) {
@@ -59,7 +61,9 @@ func Listen(path string) (*Server, error) {
 		_ = os.Remove(path)
 		return nil, err
 	}
-	return &Server{path: path, identity: identity, listener: listener}, nil
+	return &Server{
+		path: path, identity: identity, listener: listener, closeDone: make(chan struct{}),
+	}, nil
 }
 
 func prepareSocketPath(path string) error {
@@ -155,8 +159,12 @@ func (s *Server) Serve(ctx context.Context, handler func(context.Context, net.Co
 func (s *Server) Close() error {
 	s.mutex.Lock()
 	if s.closed {
+		done := s.closeDone
 		s.mutex.Unlock()
-		return nil
+		<-done
+		s.mutex.Lock()
+		defer s.mutex.Unlock()
+		return s.closeErr
 	}
 	s.closed = true
 	listener := s.listener
@@ -169,7 +177,12 @@ func (s *Server) Close() error {
 	if listener != nil {
 		_ = listener.Close()
 	}
-	return s.removeOwnSocket()
+	closeErr := s.removeOwnSocket()
+	s.mutex.Lock()
+	s.closeErr = closeErr
+	close(s.closeDone)
+	s.mutex.Unlock()
+	return closeErr
 }
 
 func (s *Server) removeOwnSocket() error {
