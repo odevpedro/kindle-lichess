@@ -195,8 +195,25 @@ construções produziram o pacote idêntico de 2.605.964 bytes com SHA-256
 Somente `bridge/unix_transport.lua` e `MANIFEST.sha256` foram instalados, com 33/33
 hashes aprovados e backup em `/tmp/kindle-lichess-backup-ffi-815456f0/`.
 
-O token não foi retransmitido: isso ocorrerá somente após o último reinício manual para
-não repetir a remoção observada.
+Uma segunda abertura confirmou que `AF_UNIX` fora resolvido, mas revelou que o mesmo
+runtime também não declara `sockaddr_un`, `connect`, `F_GETFL`, `F_SETFL`, `F_SETFD` e
+`FD_CLOEXEC`. O módulo passou a declarar estrutura, função ausente e constantes privadas
+Linux sem depender da versão de `ffi/posix_h`. `SocketBridge:_connect()` também captura
+exceções da fábrica/transporte e as converte em erro visível, sem derrubar a janela.
+
+A revisão completa passou 88/88 verificações Lua, 10/10 testes KOReader e 8/8 pacotes
+Go. Duas construções geraram o pacote idêntico de 2.606.141 bytes com SHA-256
+`3ac47b49659dc75301d89330fa9a6fa195ad2a7ae8536756fe3769ed00e2e8ac`.
+Somente `bridge/{unix_transport,socket_bridge}.lua` e `MANIFEST.sha256` foram instalados,
+com 33/33 hashes aprovados e backup em
+`/tmp/kindle-lichess-backup-socket-3ac47b49/`.
+
+Antes do reinício, um probe isolado iniciou o bridge sem enviar JSON e carregou o novo
+transporte com o LuaJIT antigo do próprio KT4. A conexão Unix terminou com
+`OLD_KOREADER_UNIX_CONNECT_OK`; `SIGTERM` e limpeza do socket também passaram. Nenhuma
+requisição HTTPS ocorreu nesse probe.
+
+O token será retransmitido depois do reinício manual caso `/tmp` seja limpo novamente.
 
 ## Pendências
 

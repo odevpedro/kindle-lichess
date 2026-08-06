@@ -82,9 +82,12 @@ end
 function SocketBridge:_connect()
     if not self.alive or self.connected then return end
     self.connect_attempts = self.connect_attempts + 1
-    local transport = self.transport_factory(self.socket_path)
-    local ok = transport:connect()
-    if ok then
+    local factory_ok, transport = pcall(self.transport_factory, self.socket_path)
+    local call_ok, connected = false, false
+    if factory_ok and transport then
+        call_ok, connected = pcall(transport.connect, transport)
+    end
+    if call_ok and connected then
         self.transport = transport
         self.connected = true
         self.retry_callback = nil
@@ -93,7 +96,7 @@ function SocketBridge:_connect()
         self:_flush()
         return
     end
-    transport:close()
+    if transport then pcall(transport.close, transport) end
     if self.connect_attempts >= self.max_connect_attempts then
         self:_emit_error("socket_unavailable", true)
         self.failed = true

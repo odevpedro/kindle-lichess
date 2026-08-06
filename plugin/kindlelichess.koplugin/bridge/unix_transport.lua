@@ -5,12 +5,24 @@ local bit = require("bit")
 local ffi = require("ffi")
 
 require("ffi/posix_h")
+
+local C = ffi.C
+if not pcall(function() return C.connect end) then
+    ffi.cdef[[ int connect(int, const struct sockaddr *, unsigned int); ]]
+end
 ffi.cdef[[
     static const unsigned KINDLE_LICHESS_AF_UNIX = 1;
     static const unsigned KINDLE_LICHESS_SOCK_STREAM = 1;
+    static const unsigned KINDLE_LICHESS_F_GETFL = 3;
+    static const unsigned KINDLE_LICHESS_F_SETFL = 4;
+    static const unsigned KINDLE_LICHESS_F_SETFD = 2;
+    static const unsigned KINDLE_LICHESS_FD_CLOEXEC = 1;
+    static const unsigned KINDLE_LICHESS_O_NONBLOCK = 2048;
+    struct kindle_lichess_sockaddr_un {
+        unsigned short sun_family;
+        char sun_path[108];
+    };
 ]]
-
-local C = ffi.C
 local UnixTransport = {}
 UnixTransport.__index = UnixTransport
 
@@ -29,17 +41,18 @@ function UnixTransport:connect()
     end
     local fd = C.socket(C.KINDLE_LICHESS_AF_UNIX, C.KINDLE_LICHESS_SOCK_STREAM, 0)
     if fd < 0 then return nil, "socket_unavailable" end
-    local address = ffi.new("struct sockaddr_un")
+    local address = ffi.new("struct kindle_lichess_sockaddr_un")
     address.sun_family = C.KINDLE_LICHESS_AF_UNIX
     ffi.copy(address.sun_path, self.path, #self.path)
     if C.connect(fd, ffi.cast("const struct sockaddr *", address), ffi.sizeof(address)) ~= 0 then
         C.close(fd)
         return nil, "socket_unavailable"
     end
-    local flags = C.fcntl(fd, C.F_GETFL, 0)
+    local flags = C.fcntl(fd, C.KINDLE_LICHESS_F_GETFL, 0)
     if flags < 0
-            or C.fcntl(fd, C.F_SETFL, bit.bor(flags, C.O_NONBLOCK)) ~= 0
-            or C.fcntl(fd, C.F_SETFD, C.FD_CLOEXEC) ~= 0 then
+            or C.fcntl(fd, C.KINDLE_LICHESS_F_SETFL,
+                bit.bor(flags, C.KINDLE_LICHESS_O_NONBLOCK)) ~= 0
+            or C.fcntl(fd, C.KINDLE_LICHESS_F_SETFD, C.KINDLE_LICHESS_FD_CLOEXEC) ~= 0 then
         C.close(fd)
         return nil, "socket_configuration_failed"
     end

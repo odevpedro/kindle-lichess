@@ -298,6 +298,30 @@ describe("Kindle Lichess KOReader integration", function()
         assert.is_true(active_transport.closed)
     end)
 
+    it("turns a transport exception into a visible bridge error", function()
+        local SocketBridge = require("bridge/socket_bridge")
+        local events = {}
+        local bridge = SocketBridge.new{
+            emit = function(message) events[#events + 1] = message end,
+            transport_factory = function()
+                return {
+                    connect = function() error("missing old-runtime declaration") end,
+                    close = function() end,
+                }
+            end,
+            max_connect_attempts = 1,
+            encode = function() return "{}" end,
+            decode = function() return {} end,
+        }
+
+        assert.is_true(bridge:start())
+        assert.is_true(bridge.failed)
+        assert.equals("error", events[1].type)
+        assert.equals("socket_unavailable", events[1].code)
+        assert.is_true(events[1].fatal)
+        bridge:close()
+    end)
+
     it("starts and terminates the bridge as one supervised process group", function()
         local Process = require("bridge/process")
         local callbacks, killed, done_checks = {}, {}, 0
@@ -351,7 +375,7 @@ describe("Kindle Lichess KOReader integration", function()
         local ok, err = xpcall(function()
             server_fd = C.socket(C.KINDLE_LICHESS_AF_UNIX, C.KINDLE_LICHESS_SOCK_STREAM, 0)
             assert.is_true(server_fd >= 0)
-            local address = ffi.new("struct sockaddr_un")
+            local address = ffi.new("struct kindle_lichess_sockaddr_un")
             address.sun_family = C.KINDLE_LICHESS_AF_UNIX
             ffi.copy(address.sun_path, path, #path)
             assert.equals(0, C.bind(server_fd,
