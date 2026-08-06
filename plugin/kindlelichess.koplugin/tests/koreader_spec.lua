@@ -349,10 +349,10 @@ describe("Kindle Lichess KOReader integration", function()
         local server_fd, client_fd = -1, -1
         local transport
         local ok, err = xpcall(function()
-            server_fd = C.socket(C.AF_UNIX, C.KINDLE_LICHESS_SOCK_STREAM, 0)
+            server_fd = C.socket(C.KINDLE_LICHESS_AF_UNIX, C.KINDLE_LICHESS_SOCK_STREAM, 0)
             assert.is_true(server_fd >= 0)
             local address = ffi.new("struct sockaddr_un")
-            address.sun_family = C.AF_UNIX
+            address.sun_family = C.KINDLE_LICHESS_AF_UNIX
             ffi.copy(address.sun_path, path, #path)
             assert.equals(0, C.bind(server_fd,
                 ffi.cast("const struct sockaddr *", address), ffi.sizeof(address)))

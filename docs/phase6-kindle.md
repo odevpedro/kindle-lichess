@@ -175,9 +175,32 @@ validado como arquivo regular não simbólico, proprietário `root`, modo 0600 e
 limitado. Ele não integra o pacote, Git ou armazenamento persistente e será removido ao
 final da sessão. Nenhuma requisição HTTPS foi iniciada durante essa preparação.
 
+## Correção do primeiro carregamento online
+
+Na primeira abertura do modo real, a interface retornou imediatamente à tela inicial.
+O diagnóstico filtrado mostrou duas causas independentes:
+
+- `/tmp/kindle-lichess-token` havia sido removido durante o reinício do KOReader, e o
+  bridge encerrou corretamente com `token_missing`;
+- o KOReader antigo do KT4 não declara `AF_UNIX` em `ffi/posix_h`, causando
+  `missing declaration for symbol 'AF_UNIX'` antes da conexão Lua com o socket.
+
+O transporte agora declara e usa `KINDLE_LICHESS_AF_UNIX = 1`, constante POSIX para
+Linux, assim como já fazia para `SOCK_STREAM`. O teste de socket também usa somente a
+constante privada e deixa de depender da declaração presente no runtime desktop moderno.
+
+A revisão passou 88/88 verificações Lua, 9/9 testes KOReader e 8/8 pacotes Go. Duas
+construções produziram o pacote idêntico de 2.605.964 bytes com SHA-256
+`815456f011c349ad51b0749e0c2b5a423361987a8dc40a4e29cf4512f89cc4e1`.
+Somente `bridge/unix_transport.lua` e `MANIFEST.sha256` foram instalados, com 33/33
+hashes aprovados e backup em `/tmp/kindle-lichess-backup-ffi-815456f0/`.
+
+O token não foi retransmitido: isso ocorrerá somente após o último reinício manual para
+não repetir a remoção observada.
+
 ## Pendências
 
-- reiniciar manualmente somente o KOReader para carregar a nova revisão;
+- reiniciar manualmente somente o KOReader para carregar a correção FFI;
 - autenticar `GET /api/account` pela interface;
 - receber e aceitar desafio direto casual Rapid;
 - validar movimentos bilaterais, relógios, resultado e reconexão no KT4;

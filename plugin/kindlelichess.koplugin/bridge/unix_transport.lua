@@ -5,7 +5,10 @@ local bit = require("bit")
 local ffi = require("ffi")
 
 require("ffi/posix_h")
-ffi.cdef[[ static const unsigned KINDLE_LICHESS_SOCK_STREAM = 1; ]]
+ffi.cdef[[
+    static const unsigned KINDLE_LICHESS_AF_UNIX = 1;
+    static const unsigned KINDLE_LICHESS_SOCK_STREAM = 1;
+]]
 
 local C = ffi.C
 local UnixTransport = {}
@@ -24,10 +27,10 @@ function UnixTransport:connect()
     if self.path:sub(1, 1) ~= "/" or #self.path >= 108 or self.path:find("\0", 1, true) then
         return nil, "invalid_socket_path"
     end
-    local fd = C.socket(C.AF_UNIX, C.KINDLE_LICHESS_SOCK_STREAM, 0)
+    local fd = C.socket(C.KINDLE_LICHESS_AF_UNIX, C.KINDLE_LICHESS_SOCK_STREAM, 0)
     if fd < 0 then return nil, "socket_unavailable" end
     local address = ffi.new("struct sockaddr_un")
-    address.sun_family = C.AF_UNIX
+    address.sun_family = C.KINDLE_LICHESS_AF_UNIX
     ffi.copy(address.sun_path, self.path, #self.path)
     if C.connect(fd, ffi.cast("const struct sockaddr *", address), ffi.sizeof(address)) ~= 0 then
         C.close(fd)
