@@ -52,3 +52,4 @@ Tela abre → plugin inicia filho → bridge cria socket 0600 → plugin conecta
 - [ADR-0003 — servidor autoritativo](adr/0003-server-authoritative-state.md)
 - [ADR-0004 — sem engine](adr/0004-no-engine-online.md)
 - [ADR-0005 — ciclo por sessão](adr/0005-session-lifecycle.md)
+- [ADR-0006 — Lichess falso permanente de contrato](adr/0006-contract-fake-lichess.md)

@@ -42,3 +42,13 @@ Build reproduzível ARMv7 sem cgo; `file`, `readelf -h/-A`, `ldd`/interpreter; S
 Mock primeiro. Verificar menu/toque/orientação/ghosting/suspensão-Wi-Fi/RAM/encerramento/caminhos. Conta real depois. Logs sanitizados; anomalia para o teste.
 
 Cada fase entrega comandos/versões, testes, riscos, arquivos e hashes aplicáveis.
+
+## Resultado acumulado após a Fase 2
+
+- 64 verificações Lua puras;
+- 6 testes Busted no runtime oficial do KOReader;
+- 8 pacotes Go aprovados por `go vet` e `go test -race`;
+- Unix socket real exercitado pelo LuaJIT do KOReader;
+- sessão Go completa exercitada por Unix socket contra `httptest`.
+
+Os itens de Lichess real, ARM e dispositivo permanecem pendentes por gate de fase.
