@@ -41,10 +41,16 @@ permissões Unix reais, durante uma sessão autorizada.
 
 ## Defeito encontrado na primeira abertura
 
-O MockBridge chegou à tela de desafio, mas a janela desapareceu após `Accept`. O código
-reconstruía e liberava a árvore de botões sincronamente dentro do callback do próprio
-botão. A correção atualiza apenas o texto durante o evento transitório `status`; a troca
-estrutural para o tabuleiro continua ocorrendo depois, em `game_start`/`game_full`.
+O MockBridge chegou à tela de desafio, mas o KOReader reiniciou após `Accept`. A primeira
+correção eliminou a reconstrução da árvore de botões dentro do callback, mas o segundo
+teste no KT4 ainda falhou. O log então identificou a causa principal em
+`framecontainer.lua:143`: `_padding_left` era `nil` durante `paintTo()`.
+
+`Board` herdava de `FrameContainer`, mas sobrescrevia `getSize()`. Assim, o `paintTo()`
+herdado não executava a inicialização de padding feita por `FrameContainer:getSize()`.
+O método redundante foi removido: o tamanho agora é obtido normalmente da grade 8×8.
+O teste do tabuleiro passou a pintar de fato em um blitbuffer 600×600, cobrindo a linha
+que falhou no dispositivo.
 
 Uma tentativa separada de modo real deixou no log `absolute bridge binary path is
 required`: o carregador do KOReader fornece `self.path` relativo. O plugin agora resolve
@@ -67,8 +73,8 @@ Pacote corrigido:
 
 | Item | Valor |
 |---|---|
-| tamanho | 2.603.967 bytes |
-| SHA-256 | `34c867dbe83e74499201f62ff08f68bc0ee37df23d88a0b2bbecc62850aca88d` |
+| tamanho | 2.603.941 bytes |
+| SHA-256 | `1b48fd78f7f38d66cf9bac88fd64e4f56f2f1f1ebd2b262f6675fe79098a6e3a` |
 | SHA-256 do bridge ARM inalterado | `77c1ef20f10385190000a8b1938ef882298690110ef754256075fc69c6289d40` |
 
 ### Atualização mínima instalada

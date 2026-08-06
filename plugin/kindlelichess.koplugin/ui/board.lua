@@ -130,10 +130,6 @@ function Board:init()
     self[1] = rows
 end
 
-function Board:getSize()
-    return Geom:new{ x = 0, y = 0, w = self.board_size, h = self.board_size }
-end
-
 function Board:update(position, dirty_squares, selected, last_move)
     local refresh = {}
     for _, square in ipairs(dirty_squares or {}) do refresh[square] = true end
