@@ -10,6 +10,9 @@ Não há implantação na Fase 0.
 
 O caminho de dados real do KT4 será consultado somente com autorização, nunca presumido/hardcoded. Token futuro fica em dados próprios, não no plugin versionado.
 
+O plugin somente lê o CA bundle já fornecido pelo KOReader em `data/ca-bundle.crt`; não o
+copia, substitui ou modifica.
+
 ## Proibido
 
 Sem escrita em `/etc`, `/usr`, `/var/local`, `/opt`, `/root`, `/mnt/us/kmc` ou `chess.koplugin`; sem alterar rootfs, boot, firmware, hotfix, KPM, KOReader original, appreg.db, iptables, SSH ou serviços Amazon.

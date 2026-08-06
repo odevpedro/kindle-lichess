@@ -19,10 +19,12 @@ function Process.new(options)
     options = options or {}
     assert(valid_absolute_path(options.binary), "absolute bridge binary path is required")
     assert(valid_absolute_path(options.token_file), "absolute token file path is required")
+    assert(valid_absolute_path(options.ca_file), "absolute CA file path is required")
     assert(valid_absolute_path(options.socket_path), "absolute socket path is required")
     return setmetatable({
         binary = options.binary,
         token_file = options.token_file,
+        ca_file = options.ca_file,
         socket_path = options.socket_path,
         schedule = options.schedule or function(_, callback) callback() end,
         util = options.util or FFIUtil,
@@ -34,9 +36,11 @@ end
 
 function Process:start()
     if self.pid then return true end
-    local binary, socket_path, token_file = self.binary, self.socket_path, self.token_file
+    local binary, socket_path = self.binary, self.socket_path
+    local token_file, ca_file = self.token_file, self.ca_file
     local pid = self.util.runInSubProcess(function()
-        C.execl(binary, binary, "-socket", socket_path, "-token-file", token_file, nil)
+        C.execl(binary, binary, "-socket", socket_path, "-token-file", token_file,
+            "-ca-file", ca_file, nil)
     end)
     if not pid then return nil, "process_start_failed" end
     self.pid = pid

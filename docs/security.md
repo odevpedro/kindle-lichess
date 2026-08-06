@@ -10,7 +10,11 @@ Inexistente nas Fases 0–2. Na Fase 3: manual, fora de chat/Git, arquivo config
 
 ## Rede/logs
 
-TLS/hostname normais, nunca desabilitados. CA roots/DNS do firmware são gates. Timeouts por fase, detecção de inatividade, bodies limitados e Retry-After/backoff/jitter. Base alternativa só em testes.
+TLS/hostname normais, nunca desabilitados. O plugin passa ao bridge o caminho absoluto do
+`data/ca-bundle.crt` existente no KOReader; o arquivo é somente leitura, regular, PEM
+válido e limitado a 2 MiB. Sem caminho explícito, o bridge usa o trust store do sistema.
+DNS e kernel do firmware continuam gates. Timeouts por fase, detecção de inatividade,
+bodies limitados e Retry-After/backoff/jitter. Base alternativa só em testes.
 
 Logs por allowlist. Teste injeta token-canário e falha se aparecer em stdout/stderr/IPC. Diagnóstico pseudonimiza conta/jogo.
 

@@ -79,16 +79,21 @@ function KindleLichess:_new_bridge(controller)
     end
 
     local data_dir = self.data_dir or (DataStorage:getDataDir() .. "/kindle-lichess")
+    local data_root = self.data_root or DataStorage:getFullDataDir()
     local binary = self.bridge_binary
         or G_reader_settings:readSetting("kindlelichess_bridge_binary")
         or (self.path .. "/bin/kindle-lichess-bridge")
     local token_file = self.token_file
         or G_reader_settings:readSetting("kindlelichess_token_file")
         or (data_dir .. "/token")
+    local ca_file = self.ca_file
+        or G_reader_settings:readSetting("kindlelichess_ca_file")
+        or (data_root .. "/data/ca-bundle.crt")
     local live_factory = self.live_bridge_factory
         or function(options) return require("bridge/live_bridge").new(options) end
     callbacks.binary = binary
     callbacks.token_file = token_file
+    callbacks.ca_file = ca_file
     callbacks.socket_path = "/tmp/kindle-lichess.sock"
     callbacks.register = function(bridge) UIManager:insertZMQ(bridge) end
     callbacks.unregister = function(bridge) UIManager:removeZMQ(bridge) end

@@ -11,6 +11,7 @@ function LiveBridge.new(options)
     local process = Process.new{
         binary = assert(options.binary, "bridge binary path is required"),
         token_file = assert(options.token_file, "token file path is required"),
+        ca_file = assert(options.ca_file, "CA file path is required"),
         socket_path = assert(options.socket_path, "socket path is required"),
         schedule = assert(options.schedule, "schedule callback is required"),
     }

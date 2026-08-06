@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -36,6 +38,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) int {
 	flags.SetOutput(io.Discard)
 	socketPath := flags.String("socket", defaultSocketPath, "Unix socket path")
 	tokenFile := flags.String("token-file", "", "0600 personal access token file")
+	caFile := flags.String("ca-file", "", "optional PEM CA bundle")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		writeError(stderr, "invalid_arguments")
 		return 2
@@ -50,7 +53,11 @@ func run(ctx context.Context, args []string, stderr io.Writer) int {
 		writeError(stderr, safeErrorCode(err))
 		return 1
 	}
-	transport := newTransport()
+	transport, err := newTransport(*caFile)
+	if err != nil {
+		writeError(stderr, "ca_file_invalid")
+		return 1
+	}
 	defer transport.CloseIdleConnections()
 	client, err := lichess.NewClient("https://lichess.org", &http.Client{Transport: transport}, token)
 	if err != nil {
@@ -72,7 +79,23 @@ func run(ctx context.Context, args []string, stderr io.Writer) int {
 	return 1
 }
 
-func newTransport() *http.Transport {
+func newTransport(caFile string) (*http.Transport, error) {
+	var tlsConfig *tls.Config
+	if caFile != "" {
+		info, err := os.Lstat(caFile)
+		if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 2<<20 {
+			return nil, errors.New("invalid CA file")
+		}
+		contents, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, errors.New("invalid CA file")
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(contents) {
+			return nil, errors.New("invalid CA file")
+		}
+		tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
+	}
 	return &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -83,7 +106,8 @@ func newTransport() *http.Transport {
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: time.Second,
 		ResponseHeaderTimeout: 20 * time.Second,
-	}
+		TLSClientConfig:       tlsConfig,
+	}, nil
 }
 
 func safeErrorCode(err error) string {

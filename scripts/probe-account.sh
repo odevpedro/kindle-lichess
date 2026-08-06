@@ -7,6 +7,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 binary="${repo_dir}/dist/desktop/kindle-lichess-bridge"
 token_file="${1:-}"
+ca_file="${2:-}"
 probe_dir="$(mktemp -d /tmp/kindle-lichess-account.XXXXXX)"
 bridge_pid=""
 
@@ -33,13 +34,18 @@ if [[ ! -x "${binary}" ]]; then
     echo "erro: execute ./scripts/build-desktop.sh primeiro" >&2
     exit 2
 fi
+if [[ -n "${ca_file}" && ( "${ca_file}" != /* || ! -f "${ca_file}" || -L "${ca_file}" ) ]]; then
+    echo "erro: CA bundle deve ser absoluto, regular e não simbólico" >&2
+    exit 2
+fi
 if ! command -v socat >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
     echo "erro: socat e jq são necessários para o probe local" >&2
     exit 2
 fi
 
-"${binary}" -socket "${probe_dir}/bridge.sock" -token-file "${token_file}" \
-    >"${probe_dir}/bridge.log" 2>&1 &
+bridge_args=(-socket "${probe_dir}/bridge.sock" -token-file "${token_file}")
+if [[ -n "${ca_file}" ]]; then bridge_args+=(-ca-file "${ca_file}"); fi
+"${binary}" "${bridge_args[@]}" >"${probe_dir}/bridge.log" 2>&1 &
 bridge_pid="$!"
 for _ in {1..200}; do
     if [[ -S "${probe_dir}/bridge.sock" ]]; then break; fi

@@ -50,6 +50,7 @@ describe("Kindle Lichess KOReader integration", function()
         local plugin = KindleLichess:new{
             path = "/opt/kindlelichess.koplugin",
             data_dir = "/data/kindle-lichess",
+            data_root = "/koreader",
             bridge_mode = "live",
             live_bridge_factory = function(options)
                 captured = options
@@ -63,6 +64,7 @@ describe("Kindle Lichess KOReader integration", function()
         assert.equals(expected_bridge, bridge)
         assert.equals("/opt/kindlelichess.koplugin/bin/kindle-lichess-bridge", captured.binary)
         assert.equals("/data/kindle-lichess/token", captured.token_file)
+        assert.equals("/koreader/data/ca-bundle.crt", captured.ca_file)
         assert.equals("/tmp/kindle-lichess.sock", captured.socket_path)
         assert.is_function(captured.emit)
         assert.is_nil(captured.token)
@@ -238,6 +240,7 @@ describe("Kindle Lichess KOReader integration", function()
         local process = Process.new{
             binary = "/plugin/kindle-lichess-bridge",
             token_file = "/data/token",
+            ca_file = "/koreader/data/ca-bundle.crt",
             socket_path = "/tmp/kindle-lichess.sock",
             util = fake_util,
             kill = function(pid, signal)
