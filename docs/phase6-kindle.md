@@ -1,6 +1,6 @@
 # Fase 6 — validação no Kindle KT4
 
-Status: em andamento.
+Status: correção instalada, aguardando repetição visual do MockBridge.
 Data: 2026-08-06.
 Branch: `phase/6-kindle-validation`.
 
@@ -71,9 +71,23 @@ Pacote corrigido:
 | SHA-256 | `34c867dbe83e74499201f62ff08f68bc0ee37df23d88a0b2bbecc62850aca88d` |
 | SHA-256 do bridge ARM inalterado | `77c1ef20f10385190000a8b1938ef882298690110ef754256075fc69c6289d40` |
 
+### Atualização mínima instalada
+
+O pacote corrigido foi transferido para `/tmp/kindlelichess-update-171acca.tar.gz` e
+validado antes da extração. Os arquivos anteriores foram preservados em
+`/tmp/kindle-lichess-backup-171acca/`. Somente estes arquivos do plugin foram
+substituídos:
+
+- `main.lua`;
+- `ui/session.lua`;
+- `MANIFEST.sha256`.
+
+Após `sync`, 33/33 hashes do plugin instalado foram aprovados e o bridge permaneceu
+byte a byte igual. O rollback automático não foi acionado. A nova versão será carregada
+somente após reinício manual do KOReader.
+
 ## Pendências
 
-- atualizar no Kindle somente `main.lua`, `ui/session.lua` e `MANIFEST.sha256`;
 - repetir o fluxo MockBridge até o tabuleiro;
 - executar ciclo de vida ARM nativo e medir RSS;
 - somente então testar HTTPS/conta real com token efêmero.
