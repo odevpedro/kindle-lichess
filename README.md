@@ -8,7 +8,7 @@ Projeto mantido por [odevpedro](https://github.com/odevpedro) (`pedrosschmidt2@g
 
 ## Estado
 
-**Fase 1 — mock da interface em validação desde 2026-08-06.** A auditoria e o desenho da Fase 0 estão concluídos. O plugin já possui uma interface KOReader funcional com MockBridge e testes desktop; ainda não há bridge real, binário ARM, token ou pacote instalável.
+**Fase 1 — mock da interface concluída em 2026-08-06.** A auditoria e o desenho da Fase 0 estão concluídos. O plugin possui uma interface KOReader funcional com MockBridge e testes desktop; ainda não há bridge real, binário ARM, token ou pacote instalável.
 
 Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao dispositivo. Nenhum token foi solicitado.
 
@@ -32,6 +32,7 @@ Nenhuma conexão foi feita com o Kindle e nenhum arquivo foi transferido ao disp
 - [Backlog](docs/mvp-backlog.md), [riscos](docs/risks.md) e [testes](docs/test-plan.md)
 - [Implantação futura](docs/deployment.md)
 - [Seleção técnica da interface na Fase 1](docs/phase1-ui.md)
+- [Relatório de aceitação da Fase 1](docs/phase1-report.md)
 
 ## Fontes congeladas
 
