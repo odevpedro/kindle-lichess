@@ -92,6 +92,14 @@ Após `sync`, 33/33 hashes do plugin instalado foram aprovados e o bridge perman
 byte a byte igual. O rollback automático não foi acionado. A nova versão será carregada
 somente após reinício manual do KOReader.
 
+### Correção de pintura instalada
+
+A revisão `2013e34` foi transferida separadamente para `/tmp` e validada pelo SHA-256
+`1b48fd78f7f38d66cf9bac88fd64e4f56f2f1f1ebd2b262f6675fe79098a6e3a`. Somente
+`ui/board.lua` e `MANIFEST.sha256` foram substituídos, com backup em
+`/tmp/kindle-lichess-backup-2013e34/`. Depois de `sync`, 33/33 hashes foram novamente
+aprovados e o rollback não foi acionado.
+
 ## Pendências
 
 - repetir o fluxo MockBridge até o tabuleiro;
