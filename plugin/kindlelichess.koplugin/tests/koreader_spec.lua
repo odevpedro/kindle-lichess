@@ -384,6 +384,8 @@ describe("Kindle Lichess KOReader integration", function()
 
             transport = UnixTransport.new(path)
             assert.is_true(transport:connect())
+            local flags = C.fcntl(transport.fd, C.KINDLE_LICHESS_F_GETFL)
+            assert.is_true(bit.band(flags, C.KINDLE_LICHESS_O_NONBLOCK) ~= 0)
             client_fd = C.accept(server_fd, nil, nil)
             assert.is_true(client_fd >= 0)
             assert.equals(5, transport:write("ping\n"))

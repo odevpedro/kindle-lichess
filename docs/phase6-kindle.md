@@ -215,6 +215,27 @@ requisição HTTPS ocorreu nesse probe.
 
 O token será retransmitido depois do reinício manual caso `/tmp` seja limpo novamente.
 
+## Correção de bloqueio em `fcntl`
+
+Com o modo real em `Conectando…`, `/proc` mostrou o bridge vivo, socket Unix aceito e
+nenhum descritor de rede. Um probe do `SocketBridge` ficou bloqueado em
+`unix_stream_recvmsg`; seu `fdinfo` tinha apenas `flags: 02`, sem `O_NONBLOCK`.
+
+A causa foi a chamada variádica `fcntl`: no LuaJIT ARM, números Lua em `...` são passados
+como `double`, enquanto `F_SETFL` e `F_SETFD` exigem `int`. O transporte agora omite o
+terceiro argumento em `F_GETFL` e usa `ffi.cast("int", ...)` nos dois setters. O teste
+KOReader lê os flags do descritor e exige explicitamente `O_NONBLOCK`.
+
+A revisão passou 88/88 verificações Lua, 10/10 testes KOReader e 8/8 pacotes Go. Duas
+construções geraram o pacote idêntico de 2.606.176 bytes com SHA-256
+`0cdd27eb8176cef918510e811fe3cc35bb991c4bd9234599f7819245a623cddc`.
+Somente `bridge/unix_transport.lua` e `MANIFEST.sha256` foram instalados, com backup em
+`/tmp/kindle-lichess-backup-nonblock-0cdd27eb/`.
+
+O probe final no KT4 produziu `KINDLE_FD_NONBLOCK_OK`,
+`SOCKET_BRIDGE_CONNECTED_OK` e `NONBLOCK_PROBE_CLEANUP_OK`: flags, fila JSON, HTTPS,
+autenticação, evento `connected`, SIGTERM e limpeza passaram no runtime real.
+
 ## Pendências
 
 - reiniciar manualmente somente o KOReader para carregar a correção FFI;

@@ -48,11 +48,12 @@ function UnixTransport:connect()
         C.close(fd)
         return nil, "socket_unavailable"
     end
-    local flags = C.fcntl(fd, C.KINDLE_LICHESS_F_GETFL, 0)
+    local flags = C.fcntl(fd, C.KINDLE_LICHESS_F_GETFL)
+    local nonblocking_flags = ffi.cast("int", bit.bor(flags, C.KINDLE_LICHESS_O_NONBLOCK))
+    local close_on_exec = ffi.cast("int", C.KINDLE_LICHESS_FD_CLOEXEC)
     if flags < 0
-            or C.fcntl(fd, C.KINDLE_LICHESS_F_SETFL,
-                bit.bor(flags, C.KINDLE_LICHESS_O_NONBLOCK)) ~= 0
-            or C.fcntl(fd, C.KINDLE_LICHESS_F_SETFD, C.KINDLE_LICHESS_FD_CLOEXEC) ~= 0 then
+            or C.fcntl(fd, C.KINDLE_LICHESS_F_SETFL, nonblocking_flags) ~= 0
+            or C.fcntl(fd, C.KINDLE_LICHESS_F_SETFD, close_on_exec) ~= 0 then
         C.close(fd)
         return nil, "socket_configuration_failed"
     end
