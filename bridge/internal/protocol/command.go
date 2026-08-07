@@ -25,6 +25,8 @@ type Command struct {
 	GameID      string `json:"gameId,omitempty"`
 	Move        string `json:"move,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+	Rated       bool   `json:"rated,omitempty"`
+	TimeControl string `json:"timeControl,omitempty"`
 	Nonce       string `json:"nonce,omitempty"`
 }
 
@@ -32,13 +34,14 @@ var commandTypes = map[string]bool{
 	"connect": true, "disconnect": true, "accept_challenge": true,
 	"decline_challenge": true, "open_game": true, "close_game": true,
 	"move": true, "offer_draw": true, "accept_draw": true,
-	"decline_draw": true, "resign": true, "abort": true, "ping": true,
+	"decline_draw": true, "resign": true, "abort": true, "seek": true,
+	"cancel_seek": true, "ping": true,
 }
 
 var mutatingCommands = map[string]bool{
 	"accept_challenge": true, "decline_challenge": true, "move": true,
 	"offer_draw": true, "accept_draw": true, "decline_draw": true,
-	"resign": true, "abort": true,
+	"resign": true, "abort": true, "seek": true, "cancel_seek": true,
 }
 
 var gameCommands = map[string]bool{
@@ -142,6 +145,9 @@ func ValidateCommand(command Command) error {
 	}
 	if command.Type == "decline_challenge" && command.Reason != "" && len(command.Reason) > 64 {
 		return invalid("invalid_reason")
+	}
+	if command.Type == "seek" && (len(command.TimeControl) < 1 || len(command.TimeControl) > 32) {
+		return invalid("invalid_time_control")
 	}
 	if command.Type == "ping" && (len(command.Nonce) < 1 || len(command.Nonce) > 64) {
 		return invalid("invalid_nonce")

@@ -5,6 +5,7 @@ package protocol
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +71,8 @@ func TestValidateCommandFields(t *testing.T) {
 		{"bad challenge", Command{Version: 1, Type: "accept_challenge", RequestID: "r1"}, "invalid_challenge_id"},
 		{"bad move", Command{Version: 1, Type: "move", RequestID: "r1", GameID: "g1", Move: "e2e9"}, "invalid_move"},
 		{"bad promotion", Command{Version: 1, Type: "move", RequestID: "r1", GameID: "g1", Move: "e7e8k"}, "invalid_move"},
+		{"seek no time", Command{Version: 1, Type: "seek", RequestID: "r1"}, "invalid_time_control"},
+		{"seek huge time", Command{Version: 1, Type: "seek", RequestID: "r1", TimeControl: strings.Repeat("x", 33)}, "invalid_time_control"},
 		{"missing nonce", Command{Version: 1, Type: "ping"}, "invalid_nonce"},
 	}
 	for _, test := range tests {
@@ -96,6 +99,8 @@ func TestValidateCommandAcceptsEveryType(t *testing.T) {
 		{Version: 1, Type: "decline_draw", RequestID: "r6", GameID: "g1"},
 		{Version: 1, Type: "resign", RequestID: "r7", GameID: "g1"},
 		{Version: 1, Type: "abort", RequestID: "r8", GameID: "g1"},
+		{Version: 1, Type: "seek", RequestID: "r9", TimeControl: "600+5"},
+		{Version: 1, Type: "cancel_seek", RequestID: "r10"},
 		{Version: 1, Type: "ping", Nonce: "n1"},
 	}
 	for _, command := range commands {

@@ -114,7 +114,12 @@ func (c *Client) stream(ctx context.Context, path string, handler func(RawEvent)
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			return err
+			if errors.Is(err, io.EOF) ||
+				errors.Is(err, stream.ErrTruncatedLine) ||
+				errors.Is(err, stream.ErrMessageTooLarge) {
+				return err
+			}
+			return transportError(err)
 		}
 		var envelope struct {
 			Type string `json:"type"`
@@ -138,6 +143,34 @@ func (c *Client) DeclineChallenge(ctx context.Context, challengeID, reason strin
 		values.Set("reason", reason)
 	}
 	return c.mutate(ctx, "/api/challenge/"+url.PathEscape(challengeID)+"/decline", values.Encode())
+}
+
+type SeekOptions struct {
+	Rated       bool
+	TimeControl string
+}
+
+// CreateSeek registers a seek on the Lichess automatic seeker; when an opponent of
+// similar rating appears the event stream emits a gameStart. Rated games require a
+// time control; casual unlimited games are expressed with the special "0+1" marker.
+func (c *Client) CreateSeek(ctx context.Context, options SeekOptions) error {
+	values := url.Values{}
+	if options.Rated {
+		values.Set("rated", "true")
+	} else {
+		values.Set("rated", "false")
+	}
+	if options.TimeControl != "" {
+		values.Set("timeControl", options.TimeControl)
+	}
+	values.Set("variant", "standard")
+	values.Set("color", "random")
+	values.Set("keepAliveStream", "true")
+	return c.mutate(ctx, "/api/board/seek", values.Encode())
+}
+
+func (c *Client) CancelSeek(ctx context.Context) error {
+	return c.mutate(ctx, "/api/board/seek/cancel", "")
 }
 
 func (c *Client) Move(ctx context.Context, gameID, move string) error {

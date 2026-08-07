@@ -31,6 +31,8 @@ type API interface {
 	StreamGame(context.Context, string, func(lichess.RawEvent) error) error
 	AcceptChallenge(context.Context, string) error
 	DeclineChallenge(context.Context, string, string) error
+	CreateSeek(context.Context, lichess.SeekOptions) error
+	CancelSeek(context.Context) error
 	Move(context.Context, string, string) error
 	Draw(context.Context, string, bool) error
 	Resign(context.Context, string) error
@@ -294,6 +296,16 @@ func (s *Session) mutate(ctx context.Context, command protocol.Command) error {
 	case "decline_challenge":
 		operation = func(ctx context.Context) error {
 			return s.api.DeclineChallenge(ctx, command.ChallengeID, command.Reason)
+		}
+	case "seek":
+		operation = func(ctx context.Context) error {
+			return s.api.CreateSeek(ctx, lichess.SeekOptions{
+				Rated: command.Rated, TimeControl: command.TimeControl,
+			})
+		}
+	case "cancel_seek":
+		operation = func(ctx context.Context) error {
+			return s.api.CancelSeek(ctx)
 		}
 	case "move":
 		operation = func(ctx context.Context) error {

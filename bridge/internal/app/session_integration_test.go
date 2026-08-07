@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,19 @@ type fakeLichess struct {
 	requests        map[string]int
 	accountFailures int
 	acceptFailures  int
+	seekValues      url.Values
+}
+
+func (f *fakeLichess) recordSeek(values url.Values) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.seekValues = values
+}
+
+func (f *fakeLichess) lastSeek() url.Values {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.seekValues
 }
 
 func newFakeLichess(t *testing.T) *fakeLichess {
@@ -84,6 +98,13 @@ func (f *fakeLichess) handle(writer http.ResponseWriter, request *http.Request) 
 		}
 		writer.WriteHeader(http.StatusOK)
 		f.accountEvents <- `{"type":"gameStart","game":{"id":"g1","color":"white"}}`
+	case "/api/board/seek":
+		_ = request.ParseForm()
+		f.recordSeek(request.Form)
+		writer.WriteHeader(http.StatusOK)
+		f.accountEvents <- `{"type":"gameStart","game":{"id":"g1","color":"white"}}`
+	case "/api/board/seek/cancel":
+		writer.WriteHeader(http.StatusOK)
 	case "/api/board/game/stream/g1":
 		f.writeStream(writer, request, gameFullEvent, f.gameEvents)
 	case "/api/board/game/g1/move/e2e4":
@@ -381,6 +402,46 @@ func TestAccountStreamReconnectsAfterEOF(t *testing.T) {
 	defer mutex.Unlock()
 	if streamCalls != 2 {
 		t.Fatalf("stream calls = %d", streamCalls)
+	}
+}
+
+func TestSeekRoundTrip(t *testing.T) {
+	fake := newFakeLichess(t)
+	socket := filepath.Join(t.TempDir(), "kindle-lichess.sock")
+	server, err := ipc.Listen(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	api := testAPI(t, fake)
+	go server.Serve(ctx, func(ctx context.Context, connection net.Conn) error {
+		return NewSession(api, immediatePolicy()).Run(ctx, connection)
+	})
+	plugin := newPluginClient(t, socket)
+	defer plugin.connection.Close()
+
+	plugin.send(t, map[string]any{"v": 1, "type": "connect"})
+	plugin.until(t, "connected")
+
+	plugin.send(t, map[string]any{
+		"v": 1, "type": "seek", "requestId": "s1", "rated": false, "timeControl": "600+5",
+	})
+	if ok := plugin.until(t, "command_ok")["command_ok"]; ok["requestId"] != "s1" {
+		t.Fatalf("seek command_ok = %#v", ok)
+	}
+	values := fake.lastSeek()
+	if values.Get("timeControl") != "600+5" || values.Get("rated") != "false" ||
+		values.Get("variant") != "standard" || values.Get("keepAliveStream") != "true" {
+		t.Fatalf("seek form = %#v", values)
+	}
+	plugin.send(t, map[string]any{"v": 1, "type": "cancel_seek", "requestId": "s2"})
+	if ok := plugin.until(t, "command_ok")["command_ok"]; ok["requestId"] != "s2" {
+		t.Fatalf("cancel_seek command_ok = %#v", ok)
+	}
+	if fake.count("/api/board/seek") != 1 || fake.count("/api/board/seek/cancel") != 1 {
+		t.Fatalf("seek http counts = %d/%d", fake.count("/api/board/seek"),
+			fake.count("/api/board/seek/cancel"))
 	}
 }
 
