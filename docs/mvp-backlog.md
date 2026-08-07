@@ -41,7 +41,20 @@ P0 bloqueia MVP; P1 robustez necessária; P2 pós-MVP.
 
 - P0 transferir só após gate; MockBridge primeiro; validar processo/socket/RAM/refresh/rede/limpeza.
 - P0 conta real só depois; parar ante comportamento inesperado.
+- P2 coordenadas no tabuleiro (números `1–8` e letras `a–h`) com fonte pequena, sem
+  obstruir peças, seguidas do projeto atual e da densidade de pixels do KT4.
+- P1 criar desafio no app (não só aceitar os recebidos): direto por usuário
+  (`/api/challenge/{username}`) e seek aleatório (`/api/challenge/open`), para jogar
+  contra qualquer conta além da própria.
+- P1 ✔ Seeker automático "Jogar com alguém (10+5 casual)" — `POST /api/board/seek`
+  acha oponente aleatório de elo próximo (obrigatório: bridge, protocolo seek/cancel_seek,
+  botão no lobby e estado de busca; instantâneo no mock). Faltam: cancelar via socket e ajuste de tempos.
+- P2 "login" no aparelho via token: tela amigável para colar o token `board:play`
+  (teclado virtual do KOReader ou leitura de um arquivo em `/mnt/us`), sem depender
+  de SSH/CLI para configurar o plugin.
 
 ## Fora do MVP
 
 Matchmaking, torneios, chat, histórico completo, análise, puzzles, computador, Blitz, OAuth público e home Amazon. OAuth2 PKCE é obrigatório antes de publicação geral.
+
+O Lichess não aceita usuário/senha direto na API — toda autenticação é OAuth2. Para um público mais amplo: fluxo OAuth2 authorization code/PKCE via link de login externo, ou (recomendado no Kindle, que não tem navegador/redirect) manter o token pessoal com UX de colar token no próprio device.

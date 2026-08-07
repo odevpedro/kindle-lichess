@@ -236,10 +236,164 @@ O probe final no KT4 produziu `KINDLE_FD_NONBLOCK_OK`,
 `SOCKET_BRIDGE_CONNECTED_OK` e `NONBLOCK_PROBE_CLEANUP_OK`: flags, fila JSON, HTTPS,
 autenticação, evento `connected`, SIGTERM e limpeza passaram no runtime real.
 
+## Correção do handoff de reconexão
+
+Diagnóstico do relato "UI mostra conexão, mas o tabuleiro não abre e depois aparece erro
+de conexão": o bridge emite `disconnected` antes de cada `reconnecting` em qualquer
+oscilação de stream (`app/session.go` `notifyReconnect`), e o plugin tratava `disconnected`
+como queda definitiva — zerava a conexão, mostrava "Sem conexão" e a UI descartava o
+tabuleiro durante o handoff `opening_game → game_full`. Em rede instável isso ocorria antes
+do `game_full`, deixando a tela "conectada" sem tabuleiro e depois com erro de conexão.
+
+Mudança em `plugin/kindlelichess.koplugin/controller.lua`: `disconnected` agora é tratado
+como sinal transitório de reconexão (mesmo estado de `reconnecting`), preservando
+`game_state`/`selection`/view. A falha definitiva continua a chegar por `error` com
+`fatal=true`, único caminho que baixa a conexão para `offline`. Novos checks em
+`tests/run_unit.lua` cobrem a sequência live
+`connected → game_start → disconnected → reconnecting → game_full` e garantem que o
+tabuleiro só abre após `game_full`.
+
+Validação local:
+
+- Lua: 96/96 verificações;
+- Go com `gofmt`, `go vet` e `go test -race`: 8/8 pacotes;
+- duas construções do pacote com hash idêntico.
+
+Pacote da revisão:
+
+| Item | Valor |
+|---|---|
+| tamanho | 2.607.731 bytes |
+| SHA-256 | `f5aeaadabb93dae0fe00229855e764598b9cedac777b2ff030919a95fd7bd2d3` |
+
+O bridge ARM não foi recompilado nesta revisão (mudança é só Lua). Antes do próximo reinício
+do KOReader, o pacote atualizado deve ser transferido para `/tmp` e validado pelo SHA-256
+acima antes da extração. O token efêmero em `/tmp/kindle-lichess-token` pode precisar ser
+retransmitido se `/tmp` for limpo no reinício.
+
+## Causa raiz do `invalid response` no primeiro jogo real
+
+No primeiro teste live no KT4, após aceitar o desafio a UI ficava em
+"Reconectando em 1,2,3 s" e depois caía com "Bridge request failed
+(invalid response)", sem abrir o tabuleiro. Diagnóstico direto contra a API real
+mostrou que o cubo `gameStart`/`gameFinish` traz `status` como **objeto**
+(`{"id":20,"name":"started"}`) e `winner` também pode ser objeto, mas
+`normalizeGameReference` fazia `json.Unmarshal` de `status` numa `string`, o que
+falha e devolve `invalid_response`. O `game_start` nunca chegava ao plugin, então o
+tabuleiro não abria e o stream encerrava. O fake/desktop mandava `status` como
+string, por isso só o live real estourava.
+
+Mudança em `bridge/internal/app/normalize.go`: `normalizeGameReference` aceita a
+forma viva — `id` ou `gameId`, `status` como string ou `{id,name}`, e `winner`
+como string ou `{color,id,name}` — com testes de regressão em
+`normalize_test.go`. Não há mudança de protocolo Lua.
+
+Validação local:
+
+- Go `gofmt`, `go vet` e `go test -race`: 8/8 pacotes;
+- duas construções idênticas do pacote.
+
+Pacote/Bridge da revisão:
+
+| Item | Valor |
+|---|---|
+| SHA-256 do pacote | `7e8a7a4835d46d507eabdae5153159438266860ffbd7697835d340ec9f6948d2` |
+| SHA-256 do bridge ARM | `7a50826e8b3e3bfad21b1a27f661eb4fd8539a28738740255fd2878249d9ba59` |
+
+No KT4 foi instalado somente `bin/kindle-lichess-bridge` e `MANIFEST.sha256`
+(substituindo o bridge antigo), com `sha256sum -c` = 33/33 OK e backup em
+`/tmp/kindle-lichess-backup-bridge-7a50/`.
+
+## Causa raiz do "Bridge request failed (internal)" após um lance
+
+Relato ao vivo: "faço o lance no Kindle, ele aparece no navegador, mas a resposta do
+adversário não volta ao Kindle e aparece 'Bridge request failed'". O código reportado
+no device foi `internal` (não `not_found`). O diagnóstico no bridge: `do()` converte
+erros na abertura da conexão em `network_error` (reconectável), mas os erros de leitura
+do corpo do stream (`reader.Next()`) eram devolvidos brutos em `stream()`. Numa queda do
+Wi-Fi do KT4 no meio de uma linha NDJSON, o corpo volta `io.ErrUnexpectedEOF` ou
+`connection reset` — que o `retryDecision` não reconhecia (só `io.EOF`,
+`stream.ErrTruncatedLine`, timeout e `network_error`/`http_error`/`rate_limited`), então
+o stream encerrava como fatal e o plugin descia para `offline`, congelando o tabuleiro
+até reiniciar o KOReader.
+
+Mudança em `bridge/internal/lichess/client.go`: no loop de leitura, `io.EOF`,
+`stream.ErrTruncatedLine` e `stream.ErrMessageTooLarge` seguem como estão; qualquer
+outro erro de leitura é convertido por `transportError` em `network_error`
+(reconectável). Assim uma queda no meio de um NDJSON vira uma reconexão normal
+("Reconectando…") e o bridge reabre a partida (`game_full`), em vez de travar. NOVO
+`TestStreamReadInterruptionIsRetryable` corta a conexão no meio de uma linha e exige que
+o erro seja um `APIError` `network_error`. Não há mudança de protocolo Lua.
+
+Validação local:
+
+- Go `gofmt`, `go vet` e `go test -race`: 8/8 pacotes;
+- probe live no host: `connect → game_start → challenge → game_full` sem erro.
+
+Pacote/Bridge da revisão:
+
+| Item | Valor |
+|---|---|
+| SHA-256 do pacote | `66957a3b889885c562731db33ec2cee2b00e6519f8aa908ba6cb0dd6a38c02693` |
+| SHA-256 do bridge ARM | `e0b6f989c1f227dbb54cb95dba1237c81865b73289f6fc5447c9711ac124a2ac` |
+
+No KT4, se instalar, basta `bin/kindle-lichess-bridge`, `MANIFEST.sha256` e backup com
+`sha256sum -c` = 33/33, fechando e reabrindo o KOReader depois. Como só o binário mudou,
+a instalação pode esperar o fim da partida atual.
+
 ## Pendências
 
-- reiniciar manualmente somente o KOReader para carregar a correção FFI;
+- fechar e reabrir o Kindle Lichess para o plugin subir o novo bridge;
+- repetir: autenticar `GET /api/account`, aceitar desafio casual Rapid
+  (standard), confirmar **tabuleiro abre** sem `invalid_response`;
+- validar lances bilaterais, relógios, resultado e reconexão no KT4;
+- medir RSS com os dois streams e remover o token efêmero ao final.
 - autenticar `GET /api/account` pela interface;
 - receber e aceitar desafio direto casual Rapid;
 - validar movimentos bilaterais, relógios, resultado e reconexão no KT4;
 - medir RSS com os dois streams e remover o token efêmero ao final.
+
+## Ajustes visuais (instalados 2026-08-07)
+
+Instalado `dist/kindlelichess-koplugin-armv7.tar.gz`, SHA-256
+`e0b6f2d70ad3ffb0a695a796ec6f6416d4fec77c7228132275bb456eefd9fd48`, 33/33
+checks aprovados no device (backup `/tmp/kl-backup-lua-141235/`).
+
+- **Coordenadas fora do tabuleiro** (`ui/board.lua`): ranks `1–8` à esquerda e
+  fileiras `a–h` na base, via `HorizontalSpan` + células `CenterContainer`;
+  `Board:init` desconta `label_size` do `board_size` e recalcula o quadrado.
+- **Promoção inline** (`controller.lua`, `ui/session.lua`): removido o
+  `ButtonDialog` modal (colidia com o refresh em tela cheia no runtime do KT4 e
+  só aparecia ao fechar). `Controller:tap_square` grava `controller.promotion`
+  `{from,to}`; `Session:_promotion` adia um `_rebuild` via `UIManager:nextTick`;
+  `_build_game` renderiza um `ButtonTable` Q/R/B/N no lugar da linha de ações.
+  `promotion` é limpo ao promover com sucesso, ao fechar e em cada
+  `game_full`/`game_state`.
+- **Rei em xeque** (`ui/board.lua`): `Square.checked` + `_background()` com
+  `COLOR_GRAY`; `Board:init`/`update` usam `Position:is_in_check(turn)` +
+  `king_square(turn)`.
+- Registro: `ui/board.lua` `34e6aa17…`, `ui/session.lua` `4f56eb38…`,
+  `controller.lua` `755bea09…`, `ui/board_geometry.lua` `004296f5…`,
+  `MANIFEST.sha256` `5be6da5c…`.
+- Testes unitários `tests/run_unit.lua`: 96/96 ok; `luajit -bl` limpo.
+
+## Jogar com alguém (seeker automático, 2026-08-07)
+
+Fluxo do Lichess "jogar com alguém de elo próximo": `POST /api/board/seek`
+(rapid 10+5, casual) seguido de `gameStart` no stream de eventos quando acha oponente.
+
+- Bridge: `Client.CreateSeek`/`CancelSeek` + `SeekOptions`; protocol `seek`/
+  `cancel_seek` (valida `timeControl`); `session.go` despacha para `/api/board/seek`
+  e `/api/board/seek/cancel`.
+- Plugin: `protocol.lua` registra `seek`/`cancel_seek`; `mock_bridge` responde
+  `command_ok` e dispara `game_start`; `controller.seek_game`/`cancel_seek` +
+  estado `seeking`; `session.lua` botão "Jogar com alguém (10+5)" e "Cancelar busca"
+  no lobby (rebuild via `nextTick`).
+- Cores de velocidade aceitas em `_apply_full` ampliadas para
+  `unlimited/ultraBullet/bullet/blitz/rapid/classical/correspondence/relay`
+  (antes só rapid/classical/correspondence → bloqueava desafios do browser).
+- Testes: Go `TestSeekRoundTrip` + `TestValidateCommandAcceptsEveryType`/fields;
+  Lua 123/123.
+- SHA-256 bridge armv7 `d6f0f931…`; desktop `7de2a68a…`; plugin
+  `ec04f573…` (MANIFEST 33/33). Instalado no device 2026-08-07 (33/33, backup
+  `/tmp/kl-backup-lua-151336`).
