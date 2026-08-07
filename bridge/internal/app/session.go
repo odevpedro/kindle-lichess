@@ -23,7 +23,7 @@ import (
 
 var errDisconnect = errors.New("plugin_disconnect")
 
-const maxMutationAttempts = 3
+const maxRequestAttempts = 3
 
 type API interface {
 	Account(context.Context) (lichess.Account, error)
@@ -107,7 +107,12 @@ func (s *Session) connect(ctx context.Context) error {
 	if account != nil {
 		return s.send(map[string]any{"v": 1, "type": "connected", "account": account})
 	}
-	loaded, err := s.api.Account(ctx)
+	var loaded lichess.Account
+	err := s.runRequest(ctx, func(requestContext context.Context) error {
+		var requestErr error
+		loaded, requestErr = s.api.Account(requestContext)
+		return requestErr
+	})
 	if err != nil {
 		return s.sendAPIError(err, "", false)
 	}
@@ -313,7 +318,7 @@ func (s *Session) mutate(ctx context.Context, command protocol.Command) error {
 	if operation == nil {
 		err = errors.New("unknown mutation")
 	} else {
-		err = s.runMutation(ctx, operation)
+		err = s.runRequest(ctx, operation)
 	}
 
 	result := map[string]any{
@@ -334,15 +339,15 @@ func (s *Session) mutate(ctx context.Context, command protocol.Command) error {
 	return s.send(result)
 }
 
-func (s *Session) runMutation(ctx context.Context, operation func(context.Context) error) error {
+func (s *Session) runRequest(ctx context.Context, operation func(context.Context) error) error {
 	var err error
-	for attempt := 0; attempt < maxMutationAttempts; attempt++ {
+	for attempt := 0; attempt < maxRequestAttempts; attempt++ {
 		err = operation(ctx)
 		if err == nil {
 			return nil
 		}
-		retry, hint := mutationRetryDecision(err)
-		if !retry || attempt+1 == maxMutationAttempts {
+		retry, hint := requestRetryDecision(err)
+		if !retry || attempt+1 == maxRequestAttempts {
 			return err
 		}
 		if sleepErr := s.policy.Sleep(ctx, s.policy.Delay(attempt, hint)); sleepErr != nil {
@@ -352,7 +357,7 @@ func (s *Session) runMutation(ctx context.Context, operation func(context.Contex
 	return err
 }
 
-func mutationRetryDecision(err error) (bool, time.Duration) {
+func requestRetryDecision(err error) (bool, time.Duration) {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true, 0
 	}

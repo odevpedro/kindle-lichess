@@ -29,12 +29,13 @@ const challengeEvent = `{"type":"challenge","challenge":{"id":"c1","direction":"
 const gameFullEvent = `{"type":"gameFull","id":"g1","variant":{"key":"standard"},"speed":"rapid","rated":false,"createdAt":1,"white":{"id":"kindletester","name":"KindleTester","rating":1500},"black":{"id":"opponent","name":"Opponent","rating":1500},"initialFen":"startpos","state":{"type":"gameState","moves":"","wtime":600000,"btime":600000,"winc":5000,"binc":5000,"status":"started"}}`
 
 type fakeLichess struct {
-	server         *httptest.Server
-	accountEvents  chan string
-	gameEvents     chan string
-	mutex          sync.Mutex
-	requests       map[string]int
-	acceptFailures int
+	server          *httptest.Server
+	accountEvents   chan string
+	gameEvents      chan string
+	mutex           sync.Mutex
+	requests        map[string]int
+	accountFailures int
+	acceptFailures  int
 }
 
 func newFakeLichess(t *testing.T) *fakeLichess {
@@ -69,6 +70,10 @@ func (f *fakeLichess) handle(writer http.ResponseWriter, request *http.Request) 
 	}
 	switch request.URL.Path {
 	case "/api/account":
+		if f.count(request.URL.Path) <= f.accountFailures {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		_, _ = io.WriteString(writer, `{"id":"kindletester","username":"KindleTester"}`)
 	case "/api/stream/event":
 		f.writeStream(writer, request, challengeEvent, f.accountEvents)
@@ -207,6 +212,7 @@ func immediatePolicy() reconnect.Policy {
 
 func TestEndToEndUnixBridgeAgainstFakeLichess(t *testing.T) {
 	fake := newFakeLichess(t)
+	fake.accountFailures = 2
 	socket := filepath.Join(t.TempDir(), "kindle-lichess.sock")
 	server, err := ipc.Listen(socket)
 	if err != nil {
@@ -243,6 +249,9 @@ func TestEndToEndUnixBridgeAgainstFakeLichess(t *testing.T) {
 	account := connectedAndChallenge["connected"]["account"].(map[string]any)
 	if account["username"] != "KindleTester" {
 		t.Fatalf("account = %#v", account)
+	}
+	if calls := fake.count("/api/account"); calls != 3 {
+		t.Fatalf("transient account attempts = %d, want 3", calls)
 	}
 
 	fake.acceptFailures = 2
@@ -389,7 +398,7 @@ func TestRetryDecisionsIncludeTimeout(t *testing.T) {
 		decision func(error) (bool, time.Duration)
 	}{
 		{"stream", retryDecision},
-		{"mutation", mutationRetryDecision},
+		{"request", requestRetryDecision},
 	}
 	for _, test := range decisions {
 		retry, delay := test.decision(context.DeadlineExceeded)
