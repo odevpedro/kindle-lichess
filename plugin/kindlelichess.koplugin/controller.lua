@@ -32,6 +32,46 @@ local function last_move(moves)
     return { from = value:sub(1, 2), to = value:sub(3, 4), uci = value }
 end
 
+local supported_speeds = {
+    unlimited = true, ultraBullet = true, bullet = true, blitz = true,
+    rapid = true, classical = true, correspondence = true, relay = true,
+}
+
+local function supported_speed(speed)
+    return supported_speeds[speed] == true
+end
+
+local end_reasons = {
+    mate = "por cheque-mate",
+    checkmate = "por cheque-mate",
+    resign = "por desistência",
+    timeout = "por tempo esgotado",
+    outoftime = "por tempo esgotado",
+    flag = "por tempo esgotado",
+    illegalmove = "por lance ilegal",
+    illegal_move = "por lance ilegal",
+    stalemate = "por afogamento",
+    draw = "",
+    aborted = "",
+}
+
+local function normalize_winner(winner)
+    if winner == "w" or winner == "white" then return "w" end
+    if winner == "b" or winner == "black" then return "b" end
+    return nil
+end
+
+local function result_summary(game)
+    local winner = normalize_winner(game.winner)
+    local status = tostring(game.status)
+    if status == "aborted" then return "Partida abortada", "" end
+    if winner then
+        local color = winner == "w" and "Brancas" or "Pretas"
+        return "Vitória das " .. color, end_reasons[status] or ""
+    end
+    return "Empate", end_reasons[status] or ""
+end
+
 function Controller.new(options)
     options = options or {}
     return setmetatable({
@@ -48,7 +88,11 @@ function Controller.new(options)
         game_state = nil,
         selection = nil,
         last_move = nil,
+        promotion = nil,
+        seeking = false,
         result = nil,
+        result_summary = nil,
+        result_detail = nil,
         awaiting_reconnect_snapshot = false,
         closed = true,
     }, Controller)
@@ -99,6 +143,7 @@ function Controller:close()
     end
     self.view = "closed"
     self.connection = "offline"
+    self.promotion = nil
     self.status_text = "Fechado"
     self:_notify("closed")
 end
@@ -124,7 +169,9 @@ end
 function Controller:tap_square(square)
     if self.view ~= "game" or not self.selection then return { type = "ignored", reason = "no_game" } end
     local action = self.selection:tap(square)
-    if action.type == "move" then
+    if action.type == "promotion" then
+        self.promotion = { from = action.from, to = action.to }
+    elseif action.type == "move" then
         local marked, mark_err = self.game_state:mark_pending(action.uci)
         if not marked then return { type = "rejected", reason = mark_err } end
         self.selection:set_pending(true)
@@ -162,6 +209,7 @@ function Controller:promote(from, to, piece)
         self.selection:set_pending(false)
         return nil, err
     end
+    self.promotion = nil
     self:_notify("move", action)
     return true
 end
@@ -178,15 +226,29 @@ function Controller:abort()
     return self:_send({ type = "abort", requestId = self:_request_id(), gameId = self.game.id })
 end
 
+function Controller:seek_game()
+    if self.view ~= "lobby" then return nil, "not_in_lobby" end
+    self.seeking = true
+    self.status_text = "Procurando adversário (10+5 casual)…"
+    self:_notify("status")
+    return self:_send({ type = "seek", requestId = self:_request_id(), rated = false, timeControl = "600+5" })
+end
+
+function Controller:cancel_seek()
+    if not self.seeking then return true end
+    self.seeking = false
+    self.status_text = "Busca cancelada"
+    self:_notify("status")
+    return self:_send({ type = "cancel_seek", requestId = self:_request_id() })
+end
+
 function Controller:simulate_disconnect()
     if self.bridge and self.bridge.simulate_disconnect then self.bridge:simulate_disconnect() end
 end
 
 function Controller:_apply_full(payload)
     if payload.variant ~= "standard" then return nil, "unsupported_variant" end
-    if payload.speed ~= "rapid" and payload.speed ~= "classical" and payload.speed ~= "correspondence" then
-        return nil, "unsupported_speed"
-    end
+    if not supported_speed(payload.speed) then return nil, "unsupported_speed" end
     local player_color = payload.color
     if player_color ~= "w" and player_color ~= "b" then return nil, "invalid_player_color" end
 
@@ -206,6 +268,7 @@ function Controller:_apply_full(payload)
     self.selection = Selection.new(update.position, player_color)
     self.awaiting_reconnect_snapshot = false
     self.last_move = last_move(payload.state.moves)
+    self.promotion = nil
     self.view = "game"
     self.connection = "connected"
     self.status_text = update.position.turn == player_color and "Sua vez" or "Vez do adversário"
@@ -218,6 +281,7 @@ function Controller:_apply_state(payload)
     if not update then return nil, err end
     self.selection:set_position(update.position)
     self.selection:set_pending(update.pending_move ~= nil)
+    self.promotion = nil
     self.last_move = last_move(payload.moves)
     self.status_text = update.status == "started"
         and (update.position.turn == self.game.player_color and "Sua vez" or "Vez do adversário")
@@ -242,6 +306,7 @@ function Controller:handle(message)
         self.status_text = "Conectado como " .. message.account.username
         self:_notify("connected", message)
     elseif kind == "challenge" then
+        if self.seeking then self.seeking = false end
         self.challenge = message.challenge
         self.view = "challenge"
         self.status_text = "Desafio recebido"
@@ -253,6 +318,7 @@ function Controller:handle(message)
         self:_notify(kind, message)
     elseif kind == "game_start" then
         self.challenge = nil
+        self.seeking = false
         self.game = message.game
         self.view = "opening_game"
         self.status_text = "Abrindo partida…"
@@ -287,18 +353,25 @@ function Controller:handle(message)
         if self.selection then self.selection:set_pending(false) end
         self:_notify("reconnecting", message)
     elseif kind == "disconnected" then
-        self.connection = "offline"
-        self.status_text = "Sem conexão"
+        if self.game_state then self.game_state:begin_reconnect() end
+        self.awaiting_reconnect_snapshot = true
+        if self.selection then self.selection:set_pending(false) end
+        self.connection = "reconnecting"
+        self.status_text = "Reconectando…"
         self:_notify("disconnected", message)
     elseif kind == "game_finish" then
         self.result = message.game
         self.view = "result"
+        local summary, detail = result_summary(message.game)
+        self.result_summary = summary
+        self.result_detail = detail
         if message.game.status == "draw" then
             self.status_text = "Empate"
         elseif message.game.status == "aborted" then
             self.status_text = "Partida abortada"
         else
-            self.status_text = message.game.winner == (self.game and self.game.player_color)
+            local player_color = self.game and self.game.player_color
+            self.status_text = normalize_winner(message.game.winner) == player_color
                 and "Vitória" or "Derrota"
         end
         self:_notify("game_finish", message)

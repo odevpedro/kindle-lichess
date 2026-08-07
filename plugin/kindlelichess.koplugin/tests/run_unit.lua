@@ -209,6 +209,63 @@ check(controller.view == "result" and controller.status_text == "Empate", "draw 
 controller:close()
 check(controller.view == "closed" and not mock.alive, "closing UI stops mock bridge")
 
+local result_cases = {
+    { status = "mate", winner = "white", summary = "Vitória das Brancas", detail = "por cheque-mate" },
+    { status = "resign", winner = "black", summary = "Vitória das Pretas", detail = "por desistência" },
+    { status = "timeout", winner = "w", summary = "Vitória das Brancas", detail = "por tempo esgotado" },
+    { status = "stalemate", winner = nil, summary = "Empate", detail = "por afogamento" },
+    { status = "draw", winner = nil, summary = "Empate", detail = "" },
+    { status = "aborted", winner = nil, summary = "Partida abortada", detail = "" },
+}
+local result_controller = Controller.new({ monotonic_now = function() return now end })
+result_controller.closed = false
+result_controller.game = { id = "mockgame01", player_color = "w" }
+for _, case in ipairs(result_cases) do
+    assert(result_controller:handle({ v = 1, type = "game_finish",
+        game = { id = "mockgame01", status = case.status, winner = case.winner } }))
+    check(result_controller.result_summary == case.summary, "result summary for " .. case.status)
+    check(result_controller.result_detail == case.detail, "result detail for " .. case.status)
+end
+
+local speed_controller = Controller.new({ monotonic_now = function() return now end })
+speed_controller.closed = false
+local function speed_payload(speed)
+    return { variant = "standard", speed = speed, color = "w", id = "speedgame",
+        initialFen = "startpos", state = { moves = "", wtime = 0, btime = 0, status = "started" } }
+end
+for _, speed in ipairs({ "unlimited", "bullet", "blitz", "ultraBullet", "rapid", "classical", "relay" }) do
+    check(speed_controller:_apply_full(speed_payload(speed)) ~= nil, "accepted unsupported speed " .. speed)
+end
+check(speed_controller:_apply_full(speed_payload("nonsense")) == nil, "rejects unknown speed")
+check(speed_controller:_apply_full({ variant = "binary", speed = "rapid", color = "w", id = "v",
+    initialFen = "startpos", state = { moves = "", wtime = 0, btime = 0, status = "started" } }) == nil,
+    "rejects unsupported variant")
+
+local seek_controller = Controller.new({ monotonic_now = function() return now end })
+local seek_events = {}
+local seek_mock = MockBridge.new({
+    emit = function(message)
+        seek_events[#seek_events + 1] = message.type
+        return seek_controller:handle(message)
+    end,
+})
+seek_controller:attach_bridge(seek_mock)
+seek_controller:start()
+assert(seek_controller:decline_challenge())
+check(seek_controller.view == "lobby", "declined challenge returns to lobby")
+check(seek_controller.seeking == false, "not seeking before request")
+assert(seek_controller:seek_game())
+check(seek_controller.view == "game" and seek_controller.game.id == "mockgame01",
+    "seek matches a random opponent on the mock")
+local saw_game_start, saw_command_ok = false, false
+for _, event in ipairs(seek_events) do
+    if event == "game_start" then saw_game_start = true end
+    if event == "command_ok" then saw_command_ok = true end
+end
+check(saw_command_ok and saw_game_start, "seek emits command_ok then game_start")
+check(seek_controller.seeking == false, "matching clears seeking")
+check(seek_controller:cancel_seek() == true, "cancel without active seek is a no-op")
+
 local invalid_controller = Controller.new({ monotonic_now = function() return now end })
 invalid_controller.closed = false
 local invalid_ok, invalid_err = invalid_controller:handle({ v = 1, type = "connected", account = {} })
@@ -231,6 +288,48 @@ assert(connecting_controller:handle({
 }))
 check(connecting_controller.connection == "offline",
     "definitive connection error does not leave the title stuck on connecting")
+
+local function fake_bridge()
+    local sent = {}
+    return {
+        sent = sent,
+        send = function(_, message) sent[#sent + 1] = message; return true end,
+        start = function() return true end,
+        close = function() end,
+    }
+end
+
+local live_controller = Controller.new({ monotonic_now = function() return now end })
+live_controller.closed = false
+local live_bridge = fake_bridge()
+live_controller:attach_bridge(live_bridge)
+assert(live_controller:handle({ v = 1, type = "connected", account = { id = "acc1", username = "test" } }))
+check(live_controller.view == "lobby" and live_controller.connection == "connected",
+    "live handoff: account connection reaches lobby")
+assert(live_controller:handle({ v = 1, type = "game_start", game = { id = "livegame" } }))
+check(live_controller.view == "opening_game", "live handoff: gameStart opens opening view")
+check(live_bridge.sent[1].type == "open_game", "live handoff: open_game sent to bridge")
+assert(live_controller:handle({
+    v = 1, type = "disconnected", reason = "game_stream_interrupted", retryIn = 1,
+}))
+check(live_controller.connection == "reconnecting" and live_controller.view == "opening_game",
+    "transient stream drop must not collapse the handoff to offline/home")
+assert(live_controller:handle({
+    v = 1, type = "reconnecting", stream = "game", attempt = 1, retryIn = 1,
+}))
+check(live_controller.connection == "reconnecting", "reconnect keeps transient state")
+assert(live_controller:handle({
+    v = 1, type = "game_full", gameId = "livegame",
+    state = {
+        id = "livegame", variant = "standard", speed = "rapid", rated = false, color = "w",
+        initialFen = "startpos",
+        white = { id = "acc1", username = "You" }, black = { id = "acc2", username = "Opp" },
+        state = { moves = "", wtime = 60000, btime = 60000, winc = 5000, binc = 5000, status = "started" },
+    },
+}))
+check(live_controller.view == "game" and live_controller.game_state ~= nil,
+    "gameFull after a transient drop still opens the board")
+live_controller:close()
 
 local decline_controller = Controller.new({ monotonic_now = function() return now end })
 local decline_mock = MockBridge.new({ emit = function(message) decline_controller:handle(message) end })

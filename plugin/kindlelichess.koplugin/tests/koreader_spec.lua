@@ -136,7 +136,7 @@ describe("Kindle Lichess KOReader integration", function()
             on_tap = function(square) tapped = square end,
         }
 
-        assert.equals(600, board:getSize().w)
+        assert.equals(board.squares.a1.size * 8 + board.label_size, board:getSize().w)
         assert.equals("r", board.squares.a8.piece.type)
         assert.equals("w", board.squares.e1.piece.color)
         local framebuffer = Blitbuffer.new(600, 600)

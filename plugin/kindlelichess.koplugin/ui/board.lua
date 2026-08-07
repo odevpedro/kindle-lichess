@@ -6,14 +6,17 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
+local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local Screen = require("device").screen
+local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Widget = require("ui/widget/widget")
@@ -60,6 +63,7 @@ local Square = InputContainer:extend{
     selected = false,
     last_move = false,
     destination = false,
+    checked = false,
     callback = nil,
     show_parent = nil,
 }
@@ -70,6 +74,7 @@ function Square:_icon()
 end
 
 function Square:_background()
+    if self.checked then return Blitbuffer.COLOR_GRAY end
     local file = self.square:byte(1) - string.byte("a")
     local rank = tonumber(self.square:sub(2, 2)) - 1
     return (file + rank) % 2 == 0 and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_LIGHT_GRAY
@@ -116,14 +121,14 @@ function Square:onTapSquare()
     return true
 end
 
-function Square:set_state(piece, selected, last_move, destination)
+function Square:set_state(piece, selected, last_move, destination, checked)
     local unchanged_piece = (not self.piece and not piece)
         or (self.piece and piece and self.piece.type == piece.type and self.piece.color == piece.color)
     if unchanged_piece and self.selected == selected and self.last_move == last_move
-            and self.destination == destination then return end
+            and self.destination == destination and self.checked == checked then return end
     local dirty = self.dimen
-    self.piece, self.selected, self.last_move, self.destination =
-        piece, selected, last_move, destination
+    self.piece, self.selected, self.last_move, self.destination, self.checked =
+        piece, selected, last_move, destination, checked
     if self[1] then self[1]:free() end
     self:_build()
     if dirty and dirty.w > 0 then UIManager:setDirty(self.show_parent or self, "ui", dirty) end
@@ -144,19 +149,38 @@ local Board = FrameContainer:extend{
 
 function Board:init()
     assert(self.position, "position is required")
-    local square_size = math.floor(self.board_size / 8)
-    self.board_size = square_size * 8
+    self.label_size = math.max(13, math.floor(self.board_size * 0.05))
+    local square_size = math.floor((self.board_size - self.label_size) / 8)
+    self.board_size = square_size * 8 + self.label_size
     self.squares = {}
     self.destinations = square_set(self.destinations)
+    self.last_move = self.last_move or {}
+
+    local checked_square = self.position:is_in_check(self.position.turn)
+        and self.position:king_square(self.position.turn) or nil
+    self.checked_square = checked_square
+
+    local label_face = Font:getFace("cfont", math.max(10, math.floor(square_size * 0.26)))
+    local function label_widget(text)
+        return TextWidget:new{ text = text, face = label_face }
+    end
+
     local rows = VerticalGroup:new{}
     for row = 1, 8 do
         local columns = HorizontalGroup:new{}
+        -- rank label of this row (outer file column "1..8", from the left-hand square)
+        local rank_square = BoardGeometry.square_at(row, 1, self.orientation)
+        table.insert(columns, CenterContainer:new{
+            dimen = Geom:new{ w = self.label_size, h = square_size },
+            label_widget(rank_square:sub(2, 2)),
+        })
         for column = 1, 8 do
             local square = BoardGeometry.square_at(row, column, self.orientation)
             local widget = Square:new{
                 size = square_size,
                 square = square,
                 piece = self.position:piece_at(square),
+                checked = square == checked_square,
                 selected = square == self.selected,
                 last_move = self.last_move
                     and (square == self.last_move.from or square == self.last_move.to),
@@ -169,7 +193,19 @@ function Board:init()
         end
         table.insert(rows, columns)
     end
-    self[1] = rows
+
+    -- file labels along the bottom (a..h, from the bottom row's squares), padded
+    local files = HorizontalGroup:new{}
+    table.insert(files, HorizontalSpan:new{ width = self.label_size })
+    for column = 1, 8 do
+        local file_square = BoardGeometry.square_at(8, column, self.orientation)
+        table.insert(files, CenterContainer:new{
+            dimen = Geom:new{ w = square_size, h = self.label_size },
+            label_widget(file_square:sub(1, 1)),
+        })
+    end
+
+    self[1] = VerticalGroup:new{ rows, files }
 end
 
 function Board:update(position, dirty_squares, selected, last_move, destinations)
@@ -185,12 +221,17 @@ function Board:update(position, dirty_squares, selected, last_move, destinations
 
     self.position, self.selected, self.last_move, self.destinations =
         position, selected, last_move, destination_set
+    local checked_square = position:is_in_check(position.turn)
+        and position:king_square(position.turn) or nil
+    if self.checked_square then refresh[self.checked_square] = true end
+    if checked_square then refresh[checked_square] = true end
+    self.checked_square = checked_square
     for square in pairs(refresh) do
         local widget = self.squares[square]
         if widget then
             widget:set_state(position:piece_at(square), square == selected,
                 last_move and (square == last_move.from or square == last_move.to) or false,
-                destination_set[square] == true)
+                destination_set[square] == true, square == checked_square)
         end
     end
 end

@@ -6,7 +6,8 @@ local Protocol = { VERSION = 1, MAX_MESSAGE_BYTES = 65536 }
 local plugin_types = {
     connect = true, disconnect = true, accept_challenge = true, decline_challenge = true,
     open_game = true, close_game = true, move = true, offer_draw = true,
-    accept_draw = true, decline_draw = true, resign = true, abort = true, ping = true,
+    accept_draw = true, decline_draw = true, resign = true, abort = true,
+    seek = true, cancel_seek = true, ping = true,
 }
 
 local server_types = {
@@ -19,6 +20,7 @@ local server_types = {
 local mutating_commands = {
     accept_challenge = true, decline_challenge = true, move = true, offer_draw = true,
     accept_draw = true, decline_draw = true, resign = true, abort = true,
+    seek = true, cancel_seek = true,
 }
 
 local game_commands = {
@@ -93,6 +95,9 @@ function Protocol.validate_plugin(message)
         return nil, "invalid_challenge_id"
     end
     if kind == "move" and not valid_uci(message.move) then return nil, "invalid_move" end
+    if kind == "seek" and not bounded_string(message.timeControl, 1, 32) then
+        return nil, "invalid_time_control"
+    end
     if kind == "decline_challenge" and message.reason ~= nil
             and not bounded_string(message.reason, 1, 64) then
         return nil, "invalid_reason"

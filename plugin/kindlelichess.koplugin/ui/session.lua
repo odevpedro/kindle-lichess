@@ -3,7 +3,6 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Board = require("ui/board")
-local ButtonDialog = require("ui/widget/buttondialog")
 local ButtonTable = require("ui/widget/buttontable")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Clock = require("chess/clock")
@@ -81,6 +80,7 @@ function Session:init()
     assert(self.controller, "controller is required")
     self.dimen = Screen:getSize()
     self.full_refresh_counter = 0
+    self.pending_dialog = nil
     self.clock_callback = function() self:_refresh_clocks() end
     self.controller.on_change = function(event, payload) self:_controller_changed(event, payload) end
     if Device:hasKeys() then self.key_events.Close = { { Device.input.group.Back } } end
@@ -121,7 +121,19 @@ function Session:_simple_content()
         self.status_widget,
     }
 
-    if controller.view == "challenge" and controller.challenge then
+    if controller.view == "lobby" then
+        table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(28) })
+        if controller.seeking then
+            self.lobby_actions = self:_button_table({{
+                { text = _("Cancelar busca"), callback = function() controller:cancel_seek() end },
+            }})
+        else
+            self.lobby_actions = self:_button_table({{
+                { text = _("Jogar com alguém (10+5)"), callback = function() controller:seek_game() end },
+            }})
+        end
+        table.insert(group, self.lobby_actions)
+    elseif controller.view == "challenge" and controller.challenge then
         local challenger = controller.challenge.challenger or {}
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(24) })
         table.insert(group, TextBoxWidget:new{
@@ -140,7 +152,12 @@ function Session:_simple_content()
         table.insert(group, self.challenge_actions)
     elseif controller.view == "result" then
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(32) })
-        table.insert(group, text_widget(controller.status_text, "tfont", 34))
+        local summary = controller.result_summary or controller.status_text
+        table.insert(group, text_widget(summary, "front", 32))
+        if controller.result_detail and controller.result_detail ~= "" then
+            table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(16) })
+            table.insert(group, text_widget(controller.result_detail, "cfont", 24))
+        end
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(32) })
         table.insert(group, self:_button_table({{
             { text = _("Close"), callback = function() self:onClose() end },
@@ -184,20 +201,34 @@ function Session:_build_game()
         on_tap = function(square) controller:tap_square(square) end,
     }
 
-    local moves_played = #controller.game_state.moves
-    local finish_text = moves_played < 2 and _("Abort") or _("Resign")
-    local action_row = {
-        { text = _("Draw"), callback = function() controller:offer_draw() end },
-    }
-    if controller.bridge and controller.bridge.simulate_disconnect then
-        action_row[#action_row + 1] = {
-            text = _("Reconnect"), callback = function() controller:simulate_disconnect() end,
+    local actions
+    local promotion = controller.promotion
+    if promotion then
+        actions = self:_button_table({{
+            { text = _("Queen"), callback = function() controller:promote(promotion.from, promotion.to, "q") end },
+            { text = _("Rook"), callback = function() controller:promote(promotion.from, promotion.to, "r") end },
+        }, {
+            { text = _("Bishop"), callback = function() controller:promote(promotion.from, promotion.to, "b") end },
+            { text = _("Knight"), callback = function() controller:promote(promotion.from, promotion.to, "n") end },
+        }})
+        self.promotion_actions = actions
+    else
+        local moves_played = #controller.game_state.moves
+        local finish_text = moves_played < 2 and _("Abort") or _("Resign")
+        local action_row = {
+            { text = _("Draw"), callback = function() controller:offer_draw() end },
         }
+        if controller.bridge and controller.bridge.simulate_disconnect then
+            action_row[#action_row + 1] = {
+                text = _("Reconnect"), callback = function() controller:simulate_disconnect() end,
+            }
+        end
+        action_row[#action_row + 1] = {
+            text = finish_text, callback = function() self:_confirm_finish(moves_played < 2) end,
+        }
+        actions = self:_button_table({ action_row })
+        self.promotion_actions = nil
     end
-    action_row[#action_row + 1] = {
-        text = finish_text, callback = function() self:_confirm_finish(moves_played < 2) end,
-    }
-    local actions = self:_button_table({ action_row })
 
     self:_schedule_clock()
     return VerticalGroup:new{
@@ -218,6 +249,8 @@ function Session:_rebuild()
     if self[1] then self[1]:free() end
     self.board, self.top_clock, self.bottom_clock, self.status_widget = nil, nil, nil, nil
     self.challenge_actions = nil
+    self.lobby_actions = nil
+    self.promotion_actions = nil
     local content = self.controller.view == "game" and self.controller.game_state
         and self:_build_game() or self:_simple_content()
     self[1] = self:_root(content)
@@ -258,36 +291,50 @@ function Session:_schedule_clock()
 end
 
 function Session:_promotion(payload)
-    local dialog
-    dialog = ButtonDialog:new{
-        title = _("Choose promotion"), dismissable = false,
-        buttons = {{
-            { text = _("Queen"), callback = function() self.controller:promote(payload.from, payload.to, "q") end },
-            { text = _("Rook"), callback = function() self.controller:promote(payload.from, payload.to, "r") end },
-        }, {
-            { text = _("Bishop"), callback = function() self.controller:promote(payload.from, payload.to, "b") end },
-            { text = _("Knight"), callback = function() self.controller:promote(payload.from, payload.to, "n") end },
-        }}
-    }
-    UIManager:show(dialog, "flashui")
+    -- Render a piece-selection ButtonTable inline (replacing the action row)
+    -- instead of a ButtonDialog modal: the modal, shown from inside the board
+    -- tap callback, collided with the full-screen Session refresh on the KT4 and
+    -- only revealed itself after a later refresh (or never). Inline buttons use
+    -- the same reliable render path as the board.
+    UIManager:nextTick(function() self:_rebuild() end)
 end
 
 function Session:_confirm_finish(abort)
-    UIManager:show(ConfirmBox:new{
+    local dialog
+    dialog = ConfirmBox:new{
         text = abort and _("Abort this game?") or _("Resign this game?"),
         ok_text = abort and _("Abort") or _("Resign"),
         ok_callback = function()
             if abort then self.controller:abort() else self.controller:resign() end
         end,
-    }, "flashui")
+    }
+    self.pending_dialog = dialog
+    UIManager:show(dialog, "flashui")
+end
+
+function Session:_dismiss_dialog()
+    local dialog = self.pending_dialog
+    self.pending_dialog = nil
+    if dialog and UIManager:isWidgetShown(dialog) then
+        UIManager:close(dialog, "flashui")
+    end
 end
 
 function Session:_controller_changed(event, payload)
     if self.closing then return end
     if event == "status" then
         -- Do not free and rebuild the button tree from inside its own tap callback.
-        self:_refresh_status()
+        if self.controller.view == "lobby" then
+            UIManager:nextTick(function() self:_rebuild() end)
+        else
+            self:_refresh_status()
+        end
     elseif event == "selected" or event == "deselected" or event == "rejected" or event == "move" then
+        self:_dismiss_dialog()
+        if self.promotion_actions then
+            UIManager:nextTick(function() self:_rebuild() end)
+            return
+        end
         if self.board and self.controller.game_state then
             self.board:update(self.controller.game_state.position, {},
                 self.controller.selection.selected, self.controller.last_move,
@@ -295,8 +342,9 @@ function Session:_controller_changed(event, payload)
         end
         self:_refresh_status()
     elseif event == "promotion" then
-        self:_promotion(payload)
+        self:_promotion()
     elseif event == "game_state" and self.board then
+        self:_dismiss_dialog()
         self.board:update(payload.position, payload.dirty,
             self.controller.selection.selected, self.controller.last_move,
             self.controller.selection:available_destinations())
@@ -308,6 +356,7 @@ function Session:_controller_changed(event, payload)
             self.full_refresh_counter = 0
         end
     elseif event ~= "command_ok" and event ~= "pong" then
+        self:_dismiss_dialog()
         self:_rebuild()
     end
 end
@@ -325,6 +374,7 @@ function Session:onCloseWidget()
     if self.closing then return end
     self.closing = true
     UIManager:unschedule(self.clock_callback)
+    self:_dismiss_dialog()
     self.controller:close()
     if self.on_close then self.on_close() end
 end
