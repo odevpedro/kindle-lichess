@@ -221,6 +221,17 @@ check(invalid_controller.status_text
         == "Lichess recusou a ação; o desafio pode ter expirado (lichess_rejected)",
     "controller exposes a useful API error instead of a generic bridge failure")
 
+local connecting_controller = Controller.new({ monotonic_now = function() return now end })
+connecting_controller.closed = false
+connecting_controller.view = "connecting"
+connecting_controller.connection = "connecting"
+assert(connecting_controller:handle({
+    v = 1, type = "error", code = "auth_forbidden",
+    message = "Bridge request failed", fatal = false,
+}))
+check(connecting_controller.connection == "offline",
+    "definitive connection error does not leave the title stuck on connecting")
+
 local decline_controller = Controller.new({ monotonic_now = function() return now end })
 local decline_mock = MockBridge.new({ emit = function(message) decline_controller:handle(message) end })
 decline_controller:attach_bridge(decline_mock)

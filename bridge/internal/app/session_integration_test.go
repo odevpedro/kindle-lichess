@@ -212,7 +212,7 @@ func immediatePolicy() reconnect.Policy {
 
 func TestEndToEndUnixBridgeAgainstFakeLichess(t *testing.T) {
 	fake := newFakeLichess(t)
-	fake.accountFailures = 2
+	fake.accountFailures = 4
 	socket := filepath.Join(t.TempDir(), "kindle-lichess.sock")
 	server, err := ipc.Listen(socket)
 	if err != nil {
@@ -250,8 +250,8 @@ func TestEndToEndUnixBridgeAgainstFakeLichess(t *testing.T) {
 	if account["username"] != "KindleTester" {
 		t.Fatalf("account = %#v", account)
 	}
-	if calls := fake.count("/api/account"); calls != 3 {
-		t.Fatalf("transient account attempts = %d, want 3", calls)
+	if calls := fake.count("/api/account"); calls != 5 {
+		t.Fatalf("transient account attempts = %d, want 5", calls)
 	}
 
 	fake.acceptFailures = 2

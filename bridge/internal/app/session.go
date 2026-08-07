@@ -108,10 +108,12 @@ func (s *Session) connect(ctx context.Context) error {
 		return s.send(map[string]any{"v": 1, "type": "connected", "account": account})
 	}
 	var loaded lichess.Account
-	err := s.runRequest(ctx, func(requestContext context.Context) error {
+	err := reconnect.Run(ctx, s.policy, func(requestContext context.Context) error {
 		var requestErr error
 		loaded, requestErr = s.api.Account(requestContext)
 		return requestErr
+	}, retryDecision, func(attempt int, delay time.Duration, _ error) {
+		s.notifyReconnect("account", attempt, delay)
 	})
 	if err != nil {
 		return s.sendAPIError(err, "", false)

@@ -304,7 +304,7 @@ function Controller:handle(message)
         self:_notify("game_finish", message)
     elseif kind == "error" then
         self.status_text = error_status(message)
-        if message.fatal then self.connection = "offline" end
+        if message.fatal or self.view == "connecting" then self.connection = "offline" end
         self:_notify("error", message)
     elseif kind == "opponent_gone" then
         self.status_text = message.gone and "Adversário desconectado" or "Adversário reconectou"
