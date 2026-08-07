@@ -29,11 +29,12 @@ const challengeEvent = `{"type":"challenge","challenge":{"id":"c1","direction":"
 const gameFullEvent = `{"type":"gameFull","id":"g1","variant":{"key":"standard"},"speed":"rapid","rated":false,"createdAt":1,"white":{"id":"kindletester","name":"KindleTester","rating":1500},"black":{"id":"opponent","name":"Opponent","rating":1500},"initialFen":"startpos","state":{"type":"gameState","moves":"","wtime":600000,"btime":600000,"winc":5000,"binc":5000,"status":"started"}}`
 
 type fakeLichess struct {
-	server        *httptest.Server
-	accountEvents chan string
-	gameEvents    chan string
-	mutex         sync.Mutex
-	requests      map[string]int
+	server         *httptest.Server
+	accountEvents  chan string
+	gameEvents     chan string
+	mutex          sync.Mutex
+	requests       map[string]int
+	acceptFailures int
 }
 
 func newFakeLichess(t *testing.T) *fakeLichess {
@@ -72,6 +73,10 @@ func (f *fakeLichess) handle(writer http.ResponseWriter, request *http.Request) 
 	case "/api/stream/event":
 		f.writeStream(writer, request, challengeEvent, f.accountEvents)
 	case "/api/challenge/c1/accept":
+		if f.count(request.URL.Path) <= f.acceptFailures {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		writer.WriteHeader(http.StatusOK)
 		f.accountEvents <- `{"type":"gameStart","game":{"id":"g1","color":"white"}}`
 	case "/api/board/game/stream/g1":
@@ -240,10 +245,14 @@ func TestEndToEndUnixBridgeAgainstFakeLichess(t *testing.T) {
 		t.Fatalf("account = %#v", account)
 	}
 
+	fake.acceptFailures = 2
 	plugin.send(t, map[string]any{
 		"v": 1, "type": "accept_challenge", "requestId": "r1", "challengeId": "c1",
 	})
 	plugin.until(t, "command_ok", "game_start")
+	if calls := fake.count("/api/challenge/c1/accept"); calls != 3 {
+		t.Fatalf("transient accept attempts = %d, want 3", calls)
+	}
 	plugin.send(t, map[string]any{"v": 1, "type": "open_game", "gameId": "g1"})
 	gameFull := plugin.until(t, "game_full")["game_full"]
 	fullState := gameFull["state"].(map[string]any)
@@ -371,5 +380,21 @@ func TestErrorMessagesNeverContainUnderlyingText(t *testing.T) {
 	encoded, _ := json.Marshal(message)
 	if strings.Contains(string(encoded), "secret-like") {
 		t.Fatalf("error leaked underlying text: %s", encoded)
+	}
+}
+
+func TestRetryDecisionsIncludeTimeout(t *testing.T) {
+	decisions := []struct {
+		name     string
+		decision func(error) (bool, time.Duration)
+	}{
+		{"stream", retryDecision},
+		{"mutation", mutationRetryDecision},
+	}
+	for _, test := range decisions {
+		retry, delay := test.decision(context.DeadlineExceeded)
+		if !retry || delay != 0 {
+			t.Fatalf("%s timeout retry = %v, delay = %v", test.name, retry, delay)
+		}
 	}
 }

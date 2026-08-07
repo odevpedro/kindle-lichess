@@ -23,6 +23,8 @@ import (
 
 var errDisconnect = errors.New("plugin_disconnect")
 
+const maxMutationAttempts = 3
+
 type API interface {
 	Account(context.Context) (lichess.Account, error)
 	StreamAccount(context.Context, func(lichess.RawEvent) error) error
@@ -55,6 +57,9 @@ type Session struct {
 }
 
 func NewSession(api API, policy reconnect.Policy) *Session {
+	if policy.Sleep == nil {
+		policy.Sleep = reconnect.DefaultPolicy().Sleep
+	}
 	return &Session{api: api, policy: policy, results: make(map[string]map[string]any)}
 }
 
@@ -273,22 +278,42 @@ func (s *Session) mutate(ctx context.Context, command protocol.Command) error {
 		return s.send(result)
 	}
 
-	var err error
+	var operation func(context.Context) error
 	switch command.Type {
 	case "accept_challenge":
-		err = s.api.AcceptChallenge(ctx, command.ChallengeID)
+		operation = func(ctx context.Context) error {
+			return s.api.AcceptChallenge(ctx, command.ChallengeID)
+		}
 	case "decline_challenge":
-		err = s.api.DeclineChallenge(ctx, command.ChallengeID, command.Reason)
+		operation = func(ctx context.Context) error {
+			return s.api.DeclineChallenge(ctx, command.ChallengeID, command.Reason)
+		}
 	case "move":
-		err = s.api.Move(ctx, command.GameID, command.Move)
+		operation = func(ctx context.Context) error {
+			return s.api.Move(ctx, command.GameID, command.Move)
+		}
 	case "offer_draw", "accept_draw":
-		err = s.api.Draw(ctx, command.GameID, true)
+		operation = func(ctx context.Context) error {
+			return s.api.Draw(ctx, command.GameID, true)
+		}
 	case "decline_draw":
-		err = s.api.Draw(ctx, command.GameID, false)
+		operation = func(ctx context.Context) error {
+			return s.api.Draw(ctx, command.GameID, false)
+		}
 	case "resign":
-		err = s.api.Resign(ctx, command.GameID)
+		operation = func(ctx context.Context) error {
+			return s.api.Resign(ctx, command.GameID)
+		}
 	case "abort":
-		err = s.api.Abort(ctx, command.GameID)
+		operation = func(ctx context.Context) error {
+			return s.api.Abort(ctx, command.GameID)
+		}
+	}
+	var err error
+	if operation == nil {
+		err = errors.New("unknown mutation")
+	} else {
+		err = s.runMutation(ctx, operation)
 	}
 
 	result := map[string]any{
@@ -307,6 +332,38 @@ func (s *Session) mutate(ctx context.Context, command protocol.Command) error {
 	}
 	s.remember(command.RequestID, result)
 	return s.send(result)
+}
+
+func (s *Session) runMutation(ctx context.Context, operation func(context.Context) error) error {
+	var err error
+	for attempt := 0; attempt < maxMutationAttempts; attempt++ {
+		err = operation(ctx)
+		if err == nil {
+			return nil
+		}
+		retry, hint := mutationRetryDecision(err)
+		if !retry || attempt+1 == maxMutationAttempts {
+			return err
+		}
+		if sleepErr := s.policy.Sleep(ctx, s.policy.Delay(attempt, hint)); sleepErr != nil {
+			return sleepErr
+		}
+	}
+	return err
+}
+
+func mutationRetryDecision(err error) (bool, time.Duration) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true, 0
+	}
+	var apiError *lichess.APIError
+	if errors.As(err, &apiError) {
+		switch apiError.Code {
+		case "network_error", "http_error":
+			return true, 0
+		}
+	}
+	return false, 0
 }
 
 func (s *Session) cached(requestID string) map[string]any {
@@ -377,6 +434,9 @@ func errorCodeMessage(code, requestID string, fatal bool) map[string]any {
 }
 
 func retryDecision(err error) (bool, time.Duration) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true, 0
+	}
 	if errors.Is(err, io.EOF) || errors.Is(err, stream.ErrTruncatedLine) {
 		return true, 0
 	}
