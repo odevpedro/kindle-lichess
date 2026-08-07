@@ -57,25 +57,73 @@ func normalizeChallenge(raw json.RawMessage) (map[string]any, error) {
 
 func normalizeGameReference(raw json.RawMessage) (map[string]any, error) {
 	var game struct {
-		ID     string `json:"id"`
-		Status string `json:"status,omitempty"`
-		Winner string `json:"winner,omitempty"`
-		Color  string `json:"color,omitempty"`
+		ID     string          `json:"id"`
+		GameID string          `json:"gameId"`
+		Status json.RawMessage `json:"status"`
+		Winner json.RawMessage `json:"winner"`
+		Color  string          `json:"color,omitempty"`
 	}
-	if err := json.Unmarshal(raw, &game); err != nil || game.ID == "" {
+	if err := json.Unmarshal(raw, &game); err != nil {
 		return nil, &lichess.APIError{Code: "invalid_response"}
 	}
-	result := map[string]any{"id": game.ID}
-	if game.Status != "" {
-		result["status"] = game.Status
+	id := game.ID
+	if id == "" {
+		id = game.GameID
 	}
-	if game.Winner != "" {
-		result["winner"] = game.Winner
+	if id == "" {
+		return nil, &lichess.APIError{Code: "invalid_response"}
+	}
+	result := map[string]any{"id": id}
+	if value, ok := scalarOrMember(game.Status); ok {
+		result["status"] = value
+	}
+	if value, ok := winnerValue(game.Winner); ok {
+		result["winner"] = value
 	}
 	if game.Color != "" {
 		result["color"] = game.Color
 	}
 	return result, nil
+}
+
+// scalarOrMember returns a non-empty string when raw is either a plain JSON
+// string or an object carrying a string member named "name". Lichess emits
+// status.turned-type sometimes as "started" and sometimes as {"id":20,"name":"started"}.
+func scalarOrMember(raw json.RawMessage) (string, bool) {
+	if value, ok := scalarString(raw); ok {
+		return value, true
+	}
+	return objectMember(raw, "name")
+}
+
+// winnerValue accepts a plain color string or an object with color/id/name.
+func winnerValue(raw json.RawMessage) (string, bool) {
+	if value, ok := scalarString(raw); ok {
+		return value, true
+	}
+	if value, ok := objectMember(raw, "color"); ok {
+		return value, true
+	}
+	if value, ok := objectMember(raw, "id"); ok {
+		return value, true
+	}
+	return objectMember(raw, "name")
+}
+
+func scalarString(raw json.RawMessage) (string, bool) {
+	var value string
+	if json.Unmarshal(raw, &value) != nil || value == "" {
+		return "", false
+	}
+	return value, true
+}
+
+func objectMember(raw json.RawMessage, key string) (string, bool) {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil {
+		return "", false
+	}
+	return scalarString(object[key])
 }
 
 func objectID(raw json.RawMessage) (string, error) {

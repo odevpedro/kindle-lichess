@@ -166,6 +166,29 @@ func TestRetryAfterHTTPDate(t *testing.T) {
 	}
 }
 
+func TestStreamReadInterruptionIsRetryable(t *testing.T) {
+	t.Parallel()
+	client, _ := newTestClient(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/x-ndjson")
+		hijacker, ok := writer.(http.Hijacker)
+		if !ok {
+			t.Fatal("server does not support hijacking")
+		}
+		connection, buffered, err := hijacker.Hijack()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = buffered.WriteString(`{"type":"gameState","moves":`)
+		_ = buffered.Flush()
+		_ = connection.Close()
+	}), "test")
+	var apiError *APIError
+	err := client.StreamGame(context.Background(), "g1", func(RawEvent) error { return nil })
+	if !errors.As(err, &apiError) || apiError.Code != "network_error" {
+		t.Fatalf("error = %v (want retryable network_error)", err)
+	}
+}
+
 func TestContextCancellationClosesStream(t *testing.T) {
 	t.Parallel()
 	requestStarted := make(chan struct{})
