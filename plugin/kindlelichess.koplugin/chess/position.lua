@@ -39,6 +39,7 @@ local function square_coords(square)
 end
 
 local function coords_square(file, rank)
+    file, rank = math.floor(file), math.floor(rank)
     if file < 1 or file > 8 or rank < 1 or rank > 8 then return nil end
     return string.char(string.byte("a") + file - 1) .. tostring(rank)
 end

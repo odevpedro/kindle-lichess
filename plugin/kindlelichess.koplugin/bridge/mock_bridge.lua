@@ -201,6 +201,12 @@ function MockBridge:send(message)
         self:_emit({ v = 1, type = "game_start", game = { id = GAME_ID } }, 0.05)
     elseif message.type == "cancel_seek" then
         self:_command_ok(message)
+    elseif message.type == "create_challenge" then
+        self:_command_ok(message)
+        self:_emit({ v = 1, type = "game_start", game = { id = GAME_ID } }, 0.05)
+    elseif message.type == "cancel_challenge" then
+        self:_command_ok(message)
+        self:_emit({ v = 1, type = "challenge_canceled", challengeId = message.challengeId }, 0.05)
     elseif message.type == "ping" then
         self:_emit({ v = 1, type = "pong", nonce = message.nonce })
     end

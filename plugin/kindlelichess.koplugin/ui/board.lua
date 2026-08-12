@@ -56,6 +56,12 @@ local function square_set(squares)
     return result
 end
 
+local function mark_move_squares(refresh, move)
+    if type(move) ~= "table" then return end
+    if move.from then refresh[move.from] = true end
+    if move.to then refresh[move.to] = true end
+end
+
 local Square = InputContainer:extend{
     size = 64,
     square = nil,
@@ -154,7 +160,6 @@ function Board:init()
     self.board_size = square_size * 8 + self.label_size
     self.squares = {}
     self.destinations = square_set(self.destinations)
-    self.last_move = self.last_move or {}
 
     local checked_square = self.position:is_in_check(self.position.turn)
         and self.position:king_square(self.position.turn) or nil
@@ -213,8 +218,8 @@ function Board:update(position, dirty_squares, selected, last_move, destinations
     for _, square in ipairs(dirty_squares or {}) do refresh[square] = true end
     if self.selected then refresh[self.selected] = true end
     if selected then refresh[selected] = true end
-    if self.last_move then refresh[self.last_move.from], refresh[self.last_move.to] = true, true end
-    if last_move then refresh[last_move.from], refresh[last_move.to] = true, true end
+    mark_move_squares(refresh, self.last_move)
+    mark_move_squares(refresh, last_move)
     for square in pairs(self.destinations or {}) do refresh[square] = true end
     local destination_set = square_set(destinations)
     for square in pairs(destination_set) do refresh[square] = true end

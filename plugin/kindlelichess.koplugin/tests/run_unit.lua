@@ -266,6 +266,66 @@ check(saw_command_ok and saw_game_start, "seek emits command_ok then game_start"
 check(seek_controller.seeking == false, "matching clears seeking")
 check(seek_controller:cancel_seek() == true, "cancel without active seek is a no-op")
 
+local challenge_controller = Controller.new({ monotonic_now = function() return now end })
+local challenge_events = {}
+local challenge_sent = {}
+local challenge_mock = MockBridge.new({
+    emit = function(message)
+        challenge_events[#challenge_events + 1] = message.type
+        return challenge_controller:handle(message)
+    end,
+})
+challenge_mock.send = function(_, message)
+    challenge_sent[#challenge_sent + 1] = message
+    return MockBridge.send(challenge_mock, message)
+end
+challenge_controller:attach_bridge(challenge_mock)
+challenge_controller:start()
+assert(challenge_controller:decline_challenge())
+check(challenge_controller.view == "lobby", "direct challenge starts from lobby")
+check(challenge_controller.challenging == false, "not challenging before request")
+assert(challenge_controller:create_challenge("PlayerTwo"))
+local create_sent
+for _, message in ipairs(challenge_sent) do
+    if message.type == "create_challenge" then create_sent = message end
+end
+check(create_sent and create_sent.username == "PlayerTwo" and create_sent.timeControl == "600+5"
+        and create_sent.rated == false,
+    "direct challenge sends username, casual 10+5 to the bridge")
+check(challenge_controller.view == "game" and challenge_controller.game.id == "mockgame01",
+    "mock direct challenge matches an opponent immediately")
+check(challenge_events[#challenge_events - 2] == "command_ok"
+        and challenge_events[#challenge_events - 1] == "game_start",
+    "direct challenge emits command_ok before game_start")
+check(challenge_controller.challenging == false, "matching clears challenging")
+check(challenge_controller:cancel_challenge() == true, "cancel without active challenge is a no-op")
+challenge_controller:close()
+
+local outbound_controller = Controller.new({ monotonic_now = function() return now end })
+outbound_controller.closed = false
+assert(outbound_controller:handle({ v = 1, type = "connected", account = { id = "acc1", username = "test" } }))
+assert(outbound_controller:handle({
+    v = 1, type = "challenge", challenge = {
+        id = "out1", direction = "out", status = "created", rated = false,
+        speed = "rapid", variant = "standard",
+    },
+}))
+check(outbound_controller.view == "challenging" and outbound_controller.challenging == true,
+    "outbound challenge stays in waiting state, not accept/decline")
+assert(outbound_controller:handle({
+    v = 1, type = "challenge", challenge = {
+        id = "in1", direction = "in", status = "created", rated = false,
+        speed = "rapid", variant = "standard",
+    },
+}))
+check(outbound_controller.view == "challenge" and outbound_controller.challenging == false,
+    "inbound challenge returns to accept/decline view")
+assert(outbound_controller:handle({
+    v = 1, type = "challenge_canceled", challengeId = "in1",
+}))
+check(outbound_controller.view == "lobby", "canceled challenge returns to lobby")
+outbound_controller:close()
+
 local invalid_controller = Controller.new({ monotonic_now = function() return now end })
 invalid_controller.closed = false
 local invalid_ok, invalid_err = invalid_controller:handle({ v = 1, type = "connected", account = {} })

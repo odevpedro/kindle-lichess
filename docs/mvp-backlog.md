@@ -43,12 +43,15 @@ P0 bloqueia MVP; P1 robustez necessária; P2 pós-MVP.
 - P0 conta real só depois; parar ante comportamento inesperado.
 - P2 coordenadas no tabuleiro (números `1–8` e letras `a–h`) com fonte pequena, sem
   obstruir peças, seguidas do projeto atual e da densidade de pixels do KT4.
-- P1 criar desafio no app (não só aceitar os recebidos): direto por usuário
-  (`/api/challenge/{username}`) e seek aleatório (`/api/challenge/open`), para jogar
-  contra qualquer conta além da própria.
+- P1 ✔ Criar desafio no app (não só aceitar os recebidos): direto por usuário
+  (`/api/challenge/{username}`, protocolo `create_challenge`/`cancel_challenge`,
+  InputDialog no lobby e estado "aguardando aceite"; instantâneo no mock). Resta:
+  seek aberto por URL (`/api/challenge/open`), para jogar contra qualquer conta
+  além da própria.
 - P1 ✔ Seeker automático "Jogar com alguém (10+5 casual)" — `POST /api/board/seek`
   acha oponente aleatório de elo próximo (obrigatório: bridge, protocolo seek/cancel_seek,
   botão no lobby e estado de busca; instantâneo no mock). Faltam: cancelar via socket e ajuste de tempos.
+  Obs.: cancelar via socket (`cancel_seek`) já foi entregue.
 - P2 "login" no aparelho via token: tela amigável para colar o token `board:play`
   (teclado virtual do KOReader ou leitura de um arquivo em `/mnt/us`), sem depender
   de SSH/CLI para configurar o plugin.

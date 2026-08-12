@@ -14,7 +14,7 @@
 
 Toda mensagem exige `v: 1` e `type` (enum, 1–64 chars). `requestId` é obrigatório para comandos com efeito; formato `[A-Za-z0-9_-]{1,64}`. O bridge guarda 128 resultados da sessão para não repetir um `requestId`.
 
-IDs de jogo/desafio: ASCII 1–32. UCI standard: `^[a-h][1-8][a-h][1-8][qrbn]?$`. Strings humanas têm limite e escape na UI.
+IDs de jogo/desafio: ASCII 1–32. UCI standard: `^[a-h][1-8][a-h][1-8][qrbn]?$`. `timeControl` é string `"limit+increment"` (em segundos, ex. `"600+5"`; `"0+1"` marca casual sem relógio). `username` é ASCII 3–32 (`[A-Za-z0-9_-]`). Strings humanas têm limite e escape na UI.
 
 ## Plugin → bridge
 
@@ -32,6 +32,10 @@ IDs de jogo/desafio: ASCII 1–32. UCI standard: `^[a-h][1-8][a-h][1-8][qrbn]?$`
 | `decline_draw` | `gameId` | POST draw/no |
 | `resign` | `gameId` | POST resign |
 | `abort` | `gameId` | POST abort quando permitido |
+| `seek` | `rated`, `timeControl` | POST `/api/board/seek` |
+| `cancel_seek` | — | POST `/api/board/seek/cancel` |
+| `create_challenge` | `username`, `rated?`, `timeControl` | POST `/api/challenge/{username}` |
+| `cancel_challenge` | `challengeId` | POST `/api/challenge/{challengeId}/cancel` (desafio outbound) |
 | `ping` | `nonce` | responde `pong` |
 
 ```json

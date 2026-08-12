@@ -8,9 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -31,8 +33,10 @@ type API interface {
 	StreamGame(context.Context, string, func(lichess.RawEvent) error) error
 	AcceptChallenge(context.Context, string) error
 	DeclineChallenge(context.Context, string, string) error
-	CreateSeek(context.Context, lichess.SeekOptions) error
+	StartSeek(context.Context, lichess.SeekOptions) (io.ReadCloser, error)
 	CancelSeek(context.Context) error
+	CreateChallenge(context.Context, string, lichess.ChallengeOptions) error
+	CancelChallenge(context.Context, string) error
 	Move(context.Context, string, string) error
 	Draw(context.Context, string, bool) error
 	Resign(context.Context, string) error
@@ -56,6 +60,7 @@ type Session struct {
 	results       map[string]map[string]any
 	resultOrder   []string
 	mutationMutex sync.Mutex
+	seekBody      io.ReadCloser
 }
 
 func NewSession(api API, policy reconnect.Policy) *Session {
@@ -160,35 +165,95 @@ func (s *Session) handleAccountEvent(event lichess.RawEvent) error {
 	case "challenge":
 		challenge, err := normalizeChallenge(payload.Challenge)
 		if err != nil {
+			logRejectedEvent(event, err)
 			return err
 		}
 		return s.send(map[string]any{"v": 1, "type": "challenge", "challenge": challenge})
 	case "challengeCanceled":
 		challengeID, err := objectID(payload.Challenge)
 		if err != nil {
+			logRejectedEvent(event, err)
 			return err
 		}
 		return s.send(map[string]any{"v": 1, "type": "challenge_canceled", "challengeId": challengeID})
 	case "challengeDeclined":
 		challengeID, err := objectID(payload.Challenge)
 		if err != nil {
+			logRejectedEvent(event, err)
 			return err
 		}
 		return s.send(map[string]any{"v": 1, "type": "challenge_declined", "challengeId": challengeID})
 	case "gameStart":
 		game, err := normalizeGameReference(payload.Game)
 		if err != nil {
+			logRejectedEvent(event, err)
 			return err
 		}
+		s.closeSeek()
 		return s.send(map[string]any{"v": 1, "type": "game_start", "game": game})
 	case "gameFinish":
 		game, err := normalizeGameReference(payload.Game)
 		if err != nil {
+			logRejectedEvent(event, err)
 			return err
 		}
 		return s.send(map[string]any{"v": 1, "type": "game_finish", "game": game})
 	default:
 		return nil
+	}
+}
+
+// logRejectedEvent writes the event that failed normalization to stderr so the
+// KOReader crash log can capture it for diagnosis. Stream payloads never
+// contain the API token. Output is bounded to avoid flooding.
+func logRejectedEvent(event lichess.RawEvent, err error) {
+	payload := event.JSON
+	if len(payload) > 800 {
+		payload = payload[:800]
+	}
+	_, _ = fmt.Fprintf(os.Stderr,
+		"kindle-lichess-bridge: normalize_reject type=%s err=%v raw=%s\n",
+		event.Type, err, payload)
+}
+
+func (s *Session) openSeek(ctx context.Context, options lichess.SeekOptions) error {
+	body, err := s.api.StartSeek(ctx, options)
+	if err != nil {
+		return err
+	}
+	s.mutex.Lock()
+	previous := s.seekBody
+	s.seekBody = body
+	s.mutex.Unlock()
+	if previous != nil {
+		_ = previous.Close()
+	}
+	s.wait.Add(1)
+	go func() {
+		defer s.wait.Done()
+		_, readErr := io.Copy(io.Discard, body)
+		s.mutex.Lock()
+		stillActive := s.seekBody == body
+		if stillActive {
+			s.seekBody = nil
+		}
+		s.mutex.Unlock()
+		_ = body.Close()
+		if readErr != nil && stillActive && !errors.Is(readErr, context.Canceled) &&
+			!errors.Is(readErr, io.EOF) {
+			_ = s.sendAPIError(readErr, "", false)
+		}
+	}()
+	return nil
+}
+
+func (s *Session) closeSeek() {
+	s.mutex.Lock()
+	body := s.seekBody
+	s.seekBody = nil
+	s.mutex.Unlock()
+	if body != nil {
+		_ = body.Close()
 	}
 }
 
@@ -245,6 +310,7 @@ func (s *Session) handleGameEvent(gameID string, event lichess.RawEvent) (bool, 
 	case "gameFull":
 		state, terminal, err := s.normalizeGameFull(event.JSON)
 		if err != nil {
+			logRejectedEvent(event, err)
 			return false, err
 		}
 		return terminal, s.send(map[string]any{
@@ -253,6 +319,7 @@ func (s *Session) handleGameEvent(gameID string, event lichess.RawEvent) (bool, 
 	case "gameState":
 		state, terminal, err := normalizeGameState(event.JSON)
 		if err != nil {
+			logRejectedEvent(event, err)
 			return false, err
 		}
 		return terminal, s.send(map[string]any{
@@ -299,13 +366,29 @@ func (s *Session) mutate(ctx context.Context, command protocol.Command) error {
 		}
 	case "seek":
 		operation = func(ctx context.Context) error {
-			return s.api.CreateSeek(ctx, lichess.SeekOptions{
+			return s.openSeek(ctx, lichess.SeekOptions{
 				Rated: command.Rated, TimeControl: command.TimeControl,
 			})
 		}
 	case "cancel_seek":
 		operation = func(ctx context.Context) error {
-			return s.api.CancelSeek(ctx)
+			err := s.api.CancelSeek(ctx)
+			s.closeSeek()
+			var apiError *lichess.APIError
+			if errors.As(err, &apiError) && apiError.Code == "not_found" {
+				return nil
+			}
+			return err
+		}
+	case "create_challenge":
+		operation = func(ctx context.Context) error {
+			return s.api.CreateChallenge(ctx, command.Username, lichess.ChallengeOptions{
+				Rated: command.Rated, TimeControl: command.TimeControl,
+			})
+		}
+	case "cancel_challenge":
+		operation = func(ctx context.Context) error {
+			return s.api.CancelChallenge(ctx, command.ChallengeID)
 		}
 	case "move":
 		operation = func(ctx context.Context) error {

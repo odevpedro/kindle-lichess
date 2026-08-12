@@ -90,6 +90,7 @@ function Controller.new(options)
         last_move = nil,
         promotion = nil,
         seeking = false,
+        challenging = false,
         result = nil,
         result_summary = nil,
         result_detail = nil,
@@ -242,6 +243,28 @@ function Controller:cancel_seek()
     return self:_send({ type = "cancel_seek", requestId = self:_request_id() })
 end
 
+function Controller:create_challenge(username)
+    if self.view ~= "lobby" then return nil, "not_in_lobby" end
+    self.challenging = true
+    self.status_text = "Desafiando " .. tostring(username) .. "…"
+    self:_notify("status")
+    return self:_send({
+        type = "create_challenge", requestId = self:_request_id(),
+        username = tostring(username), rated = false, timeControl = "600+5",
+    })
+end
+
+function Controller:cancel_challenge()
+    if not (self.challenging and self.challenge) then return true end
+    self.challenging = false
+    self.status_text = "Cancelando desafio…"
+    self:_notify("status")
+    return self:_send({
+        type = "cancel_challenge", requestId = self:_request_id(),
+        challengeId = self.challenge.id,
+    })
+end
+
 function Controller:simulate_disconnect()
     if self.bridge and self.bridge.simulate_disconnect then self.bridge:simulate_disconnect() end
 end
@@ -306,19 +329,31 @@ function Controller:handle(message)
         self.status_text = "Conectado como " .. message.account.username
         self:_notify("connected", message)
     elseif kind == "challenge" then
-        if self.seeking then self.seeking = false end
-        self.challenge = message.challenge
-        self.view = "challenge"
-        self.status_text = "Desafio recebido"
-        self:_notify("challenge", message)
+        local direction = message.challenge.direction
+        if direction == "out" then
+            self.challenge = message.challenge
+            self.challenging = true
+            self.view = "challenging"
+            self.status_text = "Desafio enviado, aguardando aceite…"
+            self:_notify("challenging", message)
+        else
+            if self.seeking then self.seeking = false end
+            self.challenging = false
+            self.challenge = message.challenge
+            self.view = "challenge"
+            self.status_text = "Desafio recebido"
+            self:_notify("challenge", message)
+        end
     elseif kind == "challenge_canceled" or kind == "challenge_declined" then
         self.challenge = nil
+        self.challenging = false
         self.view = "lobby"
         self.status_text = kind == "challenge_declined" and "Desafio recusado" or "Desafio cancelado"
         self:_notify(kind, message)
     elseif kind == "game_start" then
         self.challenge = nil
         self.seeking = false
+        self.challenging = false
         self.game = message.game
         self.view = "opening_game"
         self.status_text = "Abrindo partida…"
@@ -378,6 +413,11 @@ function Controller:handle(message)
     elseif kind == "error" then
         self.status_text = error_status(message)
         if message.fatal or self.view == "connecting" then self.connection = "offline" end
+        if not message.fatal and (self.seeking or self.challenging) then
+            self.seeking = false
+            self.challenging = false
+            self.view = "lobby"
+        end
         self:_notify("error", message)
     elseif kind == "opponent_gone" then
         self.status_text = message.gone and "Adversário desconectado" or "Adversário reconectou"

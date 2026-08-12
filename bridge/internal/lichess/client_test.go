@@ -98,11 +98,16 @@ func TestEveryBoardMutationUsesDocumentedEndpoint(t *testing.T) {
 	operations := []func() error{
 		func() error { return client.AcceptChallenge(ctx, "c1") },
 		func() error { return client.DeclineChallenge(ctx, "c1", "generic") },
+		func() error { return client.CancelChallenge(ctx, "c1") },
 		func() error { return client.Move(ctx, "g1", "e2e4") },
 		func() error { return client.Draw(ctx, "g1", true) },
 		func() error { return client.Draw(ctx, "g1", false) },
 		func() error { return client.Resign(ctx, "g1") },
 		func() error { return client.Abort(ctx, "g1") },
+		func() error {
+			return client.CreateChallenge(ctx, "player-two",
+				ChallengeOptions{Rated: false, TimeControl: "600+5"})
+		},
 	}
 	for _, operation := range operations {
 		if err := operation(); err != nil {
@@ -112,11 +117,13 @@ func TestEveryBoardMutationUsesDocumentedEndpoint(t *testing.T) {
 	want := []requestRecord{
 		{"POST", "/api/challenge/c1/accept", ""},
 		{"POST", "/api/challenge/c1/decline", "reason=generic"},
+		{"POST", "/api/challenge/c1/cancel", ""},
 		{"POST", "/api/board/game/g1/move/e2e4", ""},
 		{"POST", "/api/board/game/g1/draw/yes", ""},
 		{"POST", "/api/board/game/g1/draw/no", ""},
 		{"POST", "/api/board/game/g1/resign", ""},
 		{"POST", "/api/board/game/g1/abort", ""},
+		{"POST", "/api/challenge/player-two", "clock.increment=5&clock.limit=600&color=random&keepAliveStream=true&rated=false&variant=standard"},
 	}
 	if !reflect.DeepEqual(records, want) {
 		t.Fatalf("records = %#v, want %#v", records, want)

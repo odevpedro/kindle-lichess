@@ -12,6 +12,7 @@ local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local InputDialog = require("ui/widget/inputdialog")
 local Screen = Device.screen
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
@@ -130,8 +131,15 @@ function Session:_simple_content()
         else
             self.lobby_actions = self:_button_table({{
                 { text = _("Jogar com alguém (10+5)"), callback = function() controller:seek_game() end },
+                { text = _("Desafiar jogador…"), callback = function() self:_ask_username() end },
             }})
         end
+        table.insert(group, self.lobby_actions)
+    elseif controller.view == "challenging" then
+        table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(28) })
+        self.lobby_actions = self:_button_table({{
+            { text = _("Cancelar desafio"), callback = function() controller:cancel_challenge() end },
+        }})
         table.insert(group, self.lobby_actions)
     elseif controller.view == "challenge" and controller.challenge then
         local challenger = controller.challenge.challenger or {}
@@ -297,6 +305,27 @@ function Session:_promotion(payload)
     -- only revealed itself after a later refresh (or never). Inline buttons use
     -- the same reliable render path as the board.
     UIManager:nextTick(function() self:_rebuild() end)
+end
+
+function Session:_ask_username()
+    local dialog = InputDialog:new{
+        title = _("Opponent username"),
+        info_text = _("Lichess username, e.g. MagnusCarlsen"),
+        input = "",
+        allow_early_enter = true,
+        buttons = {{
+            { text = _("Cancel"), callback = function() self:_dismiss_dialog() end },
+            { text = _("Challenge"), callback = function()
+                local username = dialog:getInputText()
+                self:_dismiss_dialog()
+                if username and username ~= "" then
+                    self.controller:create_challenge(username)
+                end
+            end },
+        }},
+    }
+    self.pending_dialog = dialog
+    UIManager:show(dialog)
 end
 
 function Session:_confirm_finish(abort)

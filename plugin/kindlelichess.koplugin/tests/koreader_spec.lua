@@ -144,6 +144,9 @@ describe("Kindle Lichess KOReader integration", function()
         board.squares.e2:onTapSquare()
         assert.equals("e2", tapped)
 
+        -- A newly started live game has no previous move. Keep that state nil:
+        -- indexing an empty placeholder here used to crash the KT4 on first tap.
+        assert.is_nil(board.last_move)
         board:update(position, {}, "e2", nil, { "e3", "e4" })
         assert.is_true(board.squares.e3.destination)
         assert.is_true(board.squares.e4.destination)

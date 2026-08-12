@@ -397,3 +397,93 @@ Fluxo do Lichess "jogar com alguém de elo próximo": `POST /api/board/seek`
 - SHA-256 bridge armv7 `d6f0f931…`; desktop `7de2a68a…`; plugin
   `ec04f573…` (MANIFEST 33/33). Instalado no device 2026-08-07 (33/33, backup
   `/tmp/kl-backup-lua-151336`).
+
+## Desafio direto por usuário (2026-08-09)
+
+Backlog P1 "criar desafio no app (não só aceitar os recebidos) — direto por
+usuário": o plugin agora envia `POST /api/challenge/{username}` para desafiar
+qualquer conta pelo nome, sem depender do browser.
+
+- Bridge: `Client.CreateChallenge` (`ChallengeOptions`) e `Client.CancelChallenge`
+  (cancelar desafio outbound via `/api/challenge/{id}/cancel`); protocol
+  `create_challenge` (valida `username` ASCII 3–32 e `timeControl`) e
+  `cancel_challenge` (valida `challengeId`); `session.go` despacha os dois e
+  amplia a interface `API`.
+- Plugin: `protocol.lua` registra `create_challenge`/`cancel_challenge`;
+  `mock_bridge` responde `command_ok` + `game_start` (aceite imediato, igual seek)
+  e `challenge_canceled` para cancelamento; `controller.create_challenge`/
+  `cancel_challenge` + estado `challenging`; `controller:handle` distingue
+  `challenge.direction == "out"` (estado "aguardando aceite", sem aceitar/recusar
+  o próprio desafio) de desafios recebidos; `session.lua` ganhou o botão
+  "Desafiar jogador…" no lobby, um `InputDialog` para o username e a view
+  "Cancelar desafio". Erros não fatais de criação voltam ao lobby.
+- Testes: Go `TestDirectChallengeRoundTrip`, `TestValidateCommandAcceptsEveryType`
+  (com `cancel_challenge`), validação de campos (`invalid_username`,
+  `invalid_time_control`), endpoint `/api/challenge/{username}` no
+  `TestEveryBoardMutationUsesDocumentedEndpoint`; Lua 133/133 cobre criação de
+  desafio, campos enviados e o tratamento de desafio outbound/inbound.
+- SHA-256 bridge armv7 `ba96fc61…`; desktop `9981f185…`; plugin
+  `7dcf1e1b…` (pacote completo `dist/kindlelichess-koplugin-armv7.tar.gz`,
+  reproduzível em duas construções). Não instalado no device — aguardar fim da
+  validação atual no KT4; só Lua+MANIFEST mudaram além do binário.
+
+## Seek sem bloquear o command pump + fix en passant (2026-08-09)
+
+- Bridge: `Client.StartSeek` agora retorna o `io.ReadCloser` do corpo do stream
+  (`/api/board/seek` mantém o seek ativo enquanto a conexão estiver aberta).
+  `session.go` lê o corpo numa goroutine (`openSeek`/`closeSeek`) e não segura o
+  pump de comandos; `cancel_seek` (ou `gameStart`) fecha o corpo. Teste Go
+  `TestSeekStreamDoesNotBlockCommandPump` cobre: `command_ok` imediato ao seek,
+  `ping` respondendo durante o stream aberto e fechamento do corpo no cancel.
+- Plugin: bug pré-existente em `chess/position.lua` — `coords_square(from_file,
+  (from_rank + to_rank) / 2)` produzia `"d6.0"` (float) em runtimes que
+  mantêm o sufixo decimal no `tostring` (Lua 5.3+; LuaJIT do KOReader truncava,
+  por isso passava). O en passant (`e5d6` etc.) era rejeitado como
+  `evidently_illegal`. Fix: `coords_square` normaliza com `math.floor`, válido
+  tanto em LuaJIT 5.1 quanto em Lua 5.4. Reproduzido: falhava na linha 43 do
+  `tests/run_unit.lua` em lua5.4 e passa em lua5.4 e luajit (`ok - 133 checks`).
+- Bridge verificado com `gofmt`, `go vet` e `go test -race -count=1 ./...` (8/8
+  pacotes). SHA-256 dos binários ainda não rebuildados (dist ignorado pelo Git);
+  rebuildar antes de instalar no KT4.
+
+## Crash no primeiro toque de uma partida sem lances (2026-08-12)
+
+O fluxo de seek encontrava um adversário e abria a partida, mas a janela do plugin
+fechava no primeiro toque quando ainda não existia lance anterior. Uma inspeção
+somente leitura de `/mnt/us/koreader/crash.log` no KT4 encontrou três ocorrências de
+`ui/board.lua:216: table index is nil`, todas no caminho
+`Square:onTapSquare → Controller:tap_square → Session:_controller_changed → Board:update`.
+
+A causa era local à UI, não ao seeker: `Board:init` convertia a ausência de último
+lance (`nil`) em `{}`. No primeiro `Board:update`, a tabela vazia era considerada
+verdadeira pelo Lua e o código executava `refresh[self.last_move.from] = true`; como
+`from` era `nil`, o LuaJIT encerrava o callback com `table index is nil`, propagando a
+exceção até a janela do KOReader. Desafios em que já havia um lance no snapshot não
+acionavam o defeito, o que fazia o problema parecer específico do pareamento aleatório.
+
+Correção em `ui/board.lua`: preservar `last_move=nil` e marcar separadamente apenas
+casas `from`/`to` realmente presentes. A regressão em `tests/koreader_spec.lua` exige
+que um tabuleiro recém-criado mantenha `last_move=nil` antes da atualização causada
+pelo primeiro toque.
+
+Validação local:
+
+- Lua: 133/133 verificações;
+- parsing de `ui/board.lua` e `tests/koreader_spec.lua` pelo Lua embutido no Neovim;
+- Go: `gofmt`, `go vet` e `go test -race` sem falhas;
+- `git diff --check` sem erros.
+- duas construções idênticas do pacote ARMv7, SHA-256
+  `cd0e1896b6a2db0c4074db8588a0b57609b647268bb4962c5a81bc53068c4767`.
+
+O teste de integração no runtime KOReader desktop não foi executado porque a árvore
+compilada indicada por `KOREADER_SOURCE` não está presente neste host.
+
+Após autorização explícita, o pacote de 2.617.046 bytes foi transferido via SSH para
+`/tmp/kindlelichess-update-cd0e1896.tar.gz`; tamanho e SHA-256 foram confirmados no
+aparelho. O staging `/tmp/kindle-lichess-stage-cd0e1896/` passou 33/33 hashes antes da
+instalação. O plugin anterior foi preservado em
+`/tmp/kindle-lichess-backup-cd0e1896/`; a cópia instalada passou novamente 33/33 hashes
+e `ui/board.lua` coincidiu com o staging (`f852edeb00d1437629da260763b1dcdd2f2ee3d2a4f925e8071783f482c7eb41`).
+O rollback automático não foi acionado. O bridge e o socket permaneceram ausentes.
+O KOReader não foi reiniciado remotamente; é necessário reiniciá-lo manualmente para
+descartar os módulos Lua já carregados antes de repetir o seek.

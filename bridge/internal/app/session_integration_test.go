@@ -38,6 +38,10 @@ type fakeLichess struct {
 	accountFailures int
 	acceptFailures  int
 	seekValues      url.Values
+	challengeValues url.Values
+	holdSeek        bool
+	seekHeld        chan struct{}
+	seekClosed      chan struct{}
 }
 
 func (f *fakeLichess) recordSeek(values url.Values) {
@@ -52,12 +56,26 @@ func (f *fakeLichess) lastSeek() url.Values {
 	return f.seekValues
 }
 
+func (f *fakeLichess) recordChallenge(values url.Values) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.challengeValues = values
+}
+
+func (f *fakeLichess) lastChallenge() url.Values {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.challengeValues
+}
+
 func newFakeLichess(t *testing.T) *fakeLichess {
 	t.Helper()
 	fake := &fakeLichess{
 		accountEvents: make(chan string, 16),
 		gameEvents:    make(chan string, 16),
 		requests:      make(map[string]int),
+		seekHeld:      make(chan struct{}),
+		seekClosed:    make(chan struct{}),
 	}
 	fake.server = httptest.NewServer(http.HandlerFunc(fake.handle))
 	t.Cleanup(fake.server.Close)
@@ -101,9 +119,29 @@ func (f *fakeLichess) handle(writer http.ResponseWriter, request *http.Request) 
 	case "/api/board/seek":
 		_ = request.ParseForm()
 		f.recordSeek(request.Form)
+		if f.holdSeek {
+			writer.Header().Set("Content-Type", "application/x-ndjson")
+			flusher := writer.(http.Flusher)
+			_, _ = io.WriteString(writer, "{}\n")
+			flusher.Flush()
+			f.seekHeld <- struct{}{}
+			<-request.Context().Done()
+			close(f.seekClosed)
+			return
+		}
 		writer.WriteHeader(http.StatusOK)
 		f.accountEvents <- `{"type":"gameStart","game":{"id":"g1","color":"white"}}`
 	case "/api/board/seek/cancel":
+		writer.WriteHeader(http.StatusOK)
+	case "/api/challenge/direct/accept":
+		writer.WriteHeader(http.StatusOK)
+		f.accountEvents <- `{"type":"gameStart","game":{"id":"g1","color":"white"}}`
+	case "/api/challenge/player-two":
+		_ = request.ParseForm()
+		f.recordChallenge(request.Form)
+		writer.WriteHeader(http.StatusOK)
+		f.accountEvents <- `{"type":"challenge","challenge":{"id":"direct","direction":"out","status":"created","rated":false,"speed":"rapid","variant":{"key":"standard"},"color":"random","challenger":{"id":"kindletester","name":"KindleTester","rating":1500},"destUser":{"id":"player-two","name":"PlayerTwo","rating":1500},"timeControl":{"type":"clock","limit":600,"increment":5}}}`
+	case "/api/challenge/direct/cancel":
 		writer.WriteHeader(http.StatusOK)
 	case "/api/board/game/stream/g1":
 		f.writeStream(writer, request, gameFullEvent, f.gameEvents)
@@ -442,6 +480,111 @@ func TestSeekRoundTrip(t *testing.T) {
 	if fake.count("/api/board/seek") != 1 || fake.count("/api/board/seek/cancel") != 1 {
 		t.Fatalf("seek http counts = %d/%d", fake.count("/api/board/seek"),
 			fake.count("/api/board/seek/cancel"))
+	}
+}
+
+func TestSeekStreamDoesNotBlockCommandPump(t *testing.T) {
+	fake := newFakeLichess(t)
+	fake.holdSeek = true
+	socket := filepath.Join(t.TempDir(), "kindle-lichess.sock")
+	server, err := ipc.Listen(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	api := testAPI(t, fake)
+	go server.Serve(ctx, func(ctx context.Context, connection net.Conn) error {
+		return NewSession(api, immediatePolicy()).Run(ctx, connection)
+	})
+	plugin := newPluginClient(t, socket)
+	defer plugin.connection.Close()
+
+	plugin.send(t, map[string]any{"v": 1, "type": "connect"})
+	plugin.until(t, "connected")
+
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+
+	plugin.send(t, map[string]any{
+		"v": 1, "type": "seek", "requestId": "s1", "rated": false, "timeControl": "600+5",
+	})
+	select {
+	case <-fake.seekHeld:
+	case <-deadline.C:
+		t.Fatal("seek stream was not held open")
+	}
+	if ok := plugin.until(t, "command_ok")["command_ok"]; ok["requestId"] != "s1" {
+		t.Fatalf("seek command_ok = %#v", ok)
+	}
+
+	plugin.send(t, map[string]any{"v": 1, "type": "ping", "nonce": "n2"})
+	if got := plugin.until(t, "pong")["pong"]; got["nonce"] != "n2" {
+		t.Fatalf("pong after command_ok = %#v", got)
+	}
+
+	plugin.send(t, map[string]any{"v": 1, "type": "cancel_seek", "requestId": "s2"})
+	if ok := plugin.until(t, "command_ok")["command_ok"]; ok["requestId"] != "s2" {
+		t.Fatalf("cancel_seek command_ok = %#v", ok)
+	}
+
+	select {
+	case <-fake.seekClosed:
+	case <-deadline.C:
+		t.Fatal("seek stream was not closed on cancel")
+	}
+	if fake.count("/api/board/seek/cancel") != 1 {
+		t.Fatalf("seek cancel http count = %d", fake.count("/api/board/seek/cancel"))
+	}
+}
+
+func TestDirectChallengeRoundTrip(t *testing.T) {
+	fake := newFakeLichess(t)
+	socket := filepath.Join(t.TempDir(), "kindle-lichess.sock")
+	server, err := ipc.Listen(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	api := testAPI(t, fake)
+	go server.Serve(ctx, func(ctx context.Context, connection net.Conn) error {
+		return NewSession(api, immediatePolicy()).Run(ctx, connection)
+	})
+	plugin := newPluginClient(t, socket)
+	defer plugin.connection.Close()
+
+	plugin.send(t, map[string]any{"v": 1, "type": "connect"})
+	plugin.until(t, "connected")
+
+	plugin.send(t, map[string]any{
+		"v": 1, "type": "create_challenge", "requestId": "c1",
+		"username": "player-two", "rated": false, "timeControl": "600+5",
+	})
+	if ok := plugin.until(t, "command_ok")["command_ok"]; ok["requestId"] != "c1" {
+		t.Fatalf("create_challenge command_ok = %#v", ok)
+	}
+	values := fake.lastChallenge()
+	if values.Get("clock.limit") != "600" || values.Get("clock.increment") != "5" ||
+		values.Get("rated") != "false" || values.Get("variant") != "standard" ||
+		values.Get("keepAliveStream") != "true" {
+		t.Fatalf("challenge form = %#v", values)
+	}
+	if plugin.until(t, "challenge")["challenge"]["challenge"].(map[string]any)["id"] != "direct" {
+		t.Fatalf("outbound challenge was not forwarded to the plugin")
+	}
+	if fake.count("/api/challenge/player-two") != 1 {
+		t.Fatalf("challenge HTTP count = %d", fake.count("/api/challenge/player-two"))
+	}
+
+	plugin.send(t, map[string]any{
+		"v": 1, "type": "cancel_challenge", "requestId": "c2", "challengeId": "direct",
+	})
+	if ok := plugin.until(t, "command_ok")["command_ok"]; ok["requestId"] != "c2" {
+		t.Fatalf("cancel_challenge command_ok = %#v", ok)
+	}
+	if fake.count("/api/challenge/direct/cancel") != 1 {
+		t.Fatalf("cancel HTTP count = %d", fake.count("/api/challenge/direct/cancel"))
 	}
 }
 

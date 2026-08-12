@@ -81,3 +81,28 @@ func TestGameReferenceWinner(t *testing.T) {
 		t.Fatalf("winner=%v err=%v", sref["winner"], err)
 	}
 }
+
+func TestNormalizeGameStateAcceptsExpirationObject(t *testing.T) {
+	t.Parallel()
+	raw := `{"type":"gameState","moves":"","wtime":600000,"btime":600000,` +
+		`"winc":5000,"binc":5000,"status":"started",` +
+		`"expiration":{"idleMillis":813,"millisToMove":30000}}`
+	state, terminal, err := normalizeGameState(json.RawMessage(raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if terminal {
+		t.Fatalf("started state must not be terminal")
+	}
+	expiration, ok := state["expiration"].(map[string]any)
+	if !ok || expiration["idleMillis"] != float64(813) || expiration["millisToMove"] != float64(30000) {
+		t.Fatalf("expiration=%#v, want object with idleMillis/millisToMove", state["expiration"])
+	}
+}
+
+func TestNormalizeGameStateRejectsMissingStatus(t *testing.T) {
+	t.Parallel()
+	if _, _, err := normalizeGameState(json.RawMessage(`{"moves":"","wtime":0,"btime":0,"winc":0,"binc":0}`)); err == nil {
+		t.Fatal("state without status must be rejected")
+	}
+}

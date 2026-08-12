@@ -27,6 +27,7 @@ type Command struct {
 	Reason      string `json:"reason,omitempty"`
 	Rated       bool   `json:"rated,omitempty"`
 	TimeControl string `json:"timeControl,omitempty"`
+	Username    string `json:"username,omitempty"`
 	Nonce       string `json:"nonce,omitempty"`
 }
 
@@ -35,13 +36,15 @@ var commandTypes = map[string]bool{
 	"decline_challenge": true, "open_game": true, "close_game": true,
 	"move": true, "offer_draw": true, "accept_draw": true,
 	"decline_draw": true, "resign": true, "abort": true, "seek": true,
-	"cancel_seek": true, "ping": true,
+	"cancel_seek": true, "create_challenge": true, "cancel_challenge": true,
+	"ping": true,
 }
 
 var mutatingCommands = map[string]bool{
 	"accept_challenge": true, "decline_challenge": true, "move": true,
 	"offer_draw": true, "accept_draw": true, "decline_draw": true,
 	"resign": true, "abort": true, "seek": true, "cancel_seek": true,
+	"create_challenge": true, "cancel_challenge": true,
 }
 
 var gameCommands = map[string]bool{
@@ -136,7 +139,8 @@ func ValidateCommand(command Command) error {
 	if gameCommands[command.Type] && !validID(command.GameID, 32) {
 		return invalid("invalid_game_id")
 	}
-	if (command.Type == "accept_challenge" || command.Type == "decline_challenge") &&
+	if (command.Type == "accept_challenge" || command.Type == "decline_challenge" ||
+		command.Type == "cancel_challenge") &&
 		!validID(command.ChallengeID, 32) {
 		return invalid("invalid_challenge_id")
 	}
@@ -149,6 +153,12 @@ func ValidateCommand(command Command) error {
 	if command.Type == "seek" && (len(command.TimeControl) < 1 || len(command.TimeControl) > 32) {
 		return invalid("invalid_time_control")
 	}
+	if command.Type == "create_challenge" && !validUsername(command.Username) {
+		return invalid("invalid_username")
+	}
+	if command.Type == "create_challenge" && (len(command.TimeControl) < 1 || len(command.TimeControl) > 32) {
+		return invalid("invalid_time_control")
+	}
 	if command.Type == "ping" && (len(command.Nonce) < 1 || len(command.Nonce) > 64) {
 		return invalid("invalid_nonce")
 	}
@@ -157,6 +167,21 @@ func ValidateCommand(command Command) error {
 
 func validID(value string, maximum int) bool {
 	if len(value) < 1 || len(value) > maximum {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && character != '_' && character != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func validUsername(value string) bool {
+	// Lichess usernames: 3+ visible, allow letters/digits/-/_ and some Unicode.
+	// Keep transport-level check conservative ASCII to avoid encoding surprises.
+	if len(value) < 3 || len(value) > 32 {
 		return false
 	}
 	for _, character := range []byte(value) {

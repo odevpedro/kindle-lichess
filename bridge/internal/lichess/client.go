@@ -145,15 +145,22 @@ func (c *Client) DeclineChallenge(ctx context.Context, challengeID, reason strin
 	return c.mutate(ctx, "/api/challenge/"+url.PathEscape(challengeID)+"/decline", values.Encode())
 }
 
+// CancelChallenge cancels an outbound challenge the plugin created itself.
+func (c *Client) CancelChallenge(ctx context.Context, challengeID string) error {
+	return c.mutate(ctx, "/api/challenge/"+url.PathEscape(challengeID)+"/cancel", "")
+}
+
 type SeekOptions struct {
 	Rated       bool
 	TimeControl string
 }
 
-// CreateSeek registers a seek on the Lichess automatic seeker; when an opponent of
-// similar rating appears the event stream emits a gameStart. Rated games require a
-// time control; casual unlimited games are expressed with the special "0+1" marker.
-func (c *Client) CreateSeek(ctx context.Context, options SeekOptions) error {
+// StartSeek registers a seek on the Lichess automatic seeker and returns the open
+// response body. The seek stays active while this connection is open; Lichess keeps
+// the stream alive with periodic heartbeats until an opponent of similar rating
+// accepts (gameStart) or the connection is closed. The caller must keep reading
+// from the returned body and close it to cancel the seek.
+func (c *Client) StartSeek(ctx context.Context, options SeekOptions) (io.ReadCloser, error) {
 	values := url.Values{}
 	if options.Rated {
 		values.Set("rated", "true")
@@ -166,11 +173,59 @@ func (c *Client) CreateSeek(ctx context.Context, options SeekOptions) error {
 	values.Set("variant", "standard")
 	values.Set("color", "random")
 	values.Set("keepAliveStream", "true")
-	return c.mutate(ctx, "/api/board/seek", values.Encode())
+	response, err := c.do(ctx, http.MethodPost, "/api/board/seek", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+	if err != nil {
+		return nil, err
+	}
+	if err := c.responseError(response); err != nil {
+		_ = response.Body.Close()
+		return nil, err
+	}
+	return response.Body, nil
 }
 
 func (c *Client) CancelSeek(ctx context.Context) error {
 	return c.mutate(ctx, "/api/board/seek/cancel", "")
+}
+
+type ChallengeOptions struct {
+	Rated       bool
+	TimeControl string
+}
+
+// CreateChallenge sends a direct challenge to a specific username. Casual games with
+// a clock are expressed as timeControl in "limit+increment" seconds (or "0+1" for
+// unlimited), which is converted to the clock.limit/clock.increment form fields.
+func (c *Client) CreateChallenge(ctx context.Context, username string, options ChallengeOptions) error {
+	values := url.Values{}
+	if options.Rated {
+		values.Set("rated", "true")
+	} else {
+		values.Set("rated", "false")
+	}
+	if options.TimeControl != "" && options.TimeControl != "0+1" {
+		if limit, increment, ok := c.splitTimeControl(options.TimeControl); ok {
+			values.Set("clock.limit", strconv.Itoa(limit))
+			values.Set("clock.increment", strconv.Itoa(increment))
+		}
+	}
+	values.Set("variant", "standard")
+	values.Set("color", "random")
+	values.Set("keepAliveStream", "true")
+	return c.mutate(ctx, "/api/challenge/"+url.PathEscape(username), values.Encode())
+}
+
+func (*Client) splitTimeControl(value string) (int, int, bool) {
+	parts := strings.SplitN(value, "+", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	limit, limitErr := strconv.Atoi(parts[0])
+	increment, incrementErr := strconv.Atoi(parts[1])
+	if limitErr != nil || incrementErr != nil {
+		return 0, 0, false
+	}
+	return limit, increment, true
 }
 
 func (c *Client) Move(ctx context.Context, gameID, move string) error {

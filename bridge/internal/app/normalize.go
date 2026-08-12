@@ -179,16 +179,16 @@ func (s *Session) normalizeGameFull(raw json.RawMessage) (map[string]any, bool, 
 
 func normalizeGameState(raw json.RawMessage) (map[string]any, bool, error) {
 	var state struct {
-		Moves      string `json:"moves"`
-		WhiteTime  int64  `json:"wtime"`
-		BlackTime  int64  `json:"btime"`
-		WhiteInc   int64  `json:"winc"`
-		BlackInc   int64  `json:"binc"`
-		Status     string `json:"status"`
-		Winner     string `json:"winner,omitempty"`
-		WhiteDraw  bool   `json:"wdraw,omitempty"`
-		BlackDraw  bool   `json:"bdraw,omitempty"`
-		Expiration int64  `json:"expiration,omitempty"`
+		Moves      string          `json:"moves"`
+		WhiteTime  int64           `json:"wtime"`
+		BlackTime  int64           `json:"btime"`
+		WhiteInc   int64           `json:"winc"`
+		BlackInc   int64           `json:"binc"`
+		Status     string          `json:"status"`
+		Winner     string          `json:"winner,omitempty"`
+		WhiteDraw  bool            `json:"wdraw,omitempty"`
+		BlackDraw  bool            `json:"bdraw,omitempty"`
+		Expiration json.RawMessage `json:"expiration,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &state); err != nil || state.Status == "" {
 		return nil, false, &lichess.APIError{Code: "invalid_response"}
@@ -206,8 +206,8 @@ func normalizeGameState(raw json.RawMessage) (map[string]any, bool, error) {
 	if state.BlackDraw {
 		result["bdraw"] = true
 	}
-	if state.Expiration != 0 {
-		result["expiration"] = state.Expiration
+	if len(state.Expiration) > 0 && string(state.Expiration) != "null" {
+		result["expiration"] = rawObject(state.Expiration)
 	}
 	return result, state.Status != "started" && state.Status != "created", nil
 }
