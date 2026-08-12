@@ -55,6 +55,15 @@ P0 bloqueia MVP; P1 robustez necessária; P2 pós-MVP.
 - P2 "login" no aparelho via token: tela amigável para colar o token `board:play`
   (teclado virtual do KOReader ou leitura de um arquivo em `/mnt/us`), sem depender
   de SSH/CLI para configurar o plugin.
+- P0 ✔ Corrigir crash ao renderizar o resultado no KT4: substituída a face inexistente
+  `front` por `cfont`; teste de integração pinta de verdade as telas de vitória,
+  derrota, empate e aborto para impedir regressão em `frontend/ui/font.lua`.
+- P2 exibir peças capturadas/material abaixo dos jogadores, no estilo Lichess/Chess.com.
+  Derivar exclusivamente de `initialFen + moves` confirmados pelo stream (sem avaliação
+  ou engine), mostrar as peças perdidas por cada lado e, opcionalmente, a diferença
+  material convencional. A reconstrução deve tratar capturas normais, en passant,
+  promoções, posição inicial customizada, histórico divergente e reconexão, sem
+  aplicar intenção local pendente.
 
 ## Fora do MVP
 

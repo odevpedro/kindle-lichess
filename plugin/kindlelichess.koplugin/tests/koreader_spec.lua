@@ -217,6 +217,39 @@ describe("Kindle Lichess KOReader integration", function()
         framebuffer:free()
     end)
 
+    it("paints every terminal game result with a supported Kindle font", function()
+        local Blitbuffer = require("ffi/blitbuffer")
+        local Controller = require("controller")
+        local Session = require("ui/session")
+        local Screen = require("device").screen
+        local cases = {
+            { status = "mate", winner = "white", summary = "Vitória das Brancas" },
+            { status = "resign", winner = "black", summary = "Vitória das Pretas" },
+            { status = "draw", summary = "Empate" },
+            { status = "aborted", summary = "Partida abortada" },
+        }
+
+        for index, case in ipairs(cases) do
+            local controller = Controller.new{ monotonic_now = function() return 10 end }
+            controller:attach_bridge({ send = function() return true end, close = function() end })
+            controller.closed = false
+            controller.connection = "connected"
+            controller.game = { id = "resultgame" .. index, player_color = "w" }
+            local session = Session:new{ controller = controller }
+            assert.is_true(controller:handle({
+                v = 1, type = "game_finish",
+                game = { id = controller.game.id, status = case.status, winner = case.winner },
+            }))
+            assert.equals("result", controller.view)
+            assert.equals(case.summary, controller.result_summary)
+
+            local framebuffer = Blitbuffer.new(Screen:getWidth(), Screen:getHeight())
+            session:paintTo(framebuffer, 0, 0)
+            session:free()
+            framebuffer:free()
+        end
+    end)
+
     it("frames nonblocking Unix JSONL traffic without crashing on invalid input", function()
         local rapidjson = require("rapidjson")
         local SocketBridge = require("bridge/socket_bridge")

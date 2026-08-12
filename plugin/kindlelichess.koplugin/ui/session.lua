@@ -161,7 +161,7 @@ function Session:_simple_content()
     elseif controller.view == "result" then
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(32) })
         local summary = controller.result_summary or controller.status_text
-        table.insert(group, text_widget(summary, "front", 32))
+        table.insert(group, text_widget(summary, "cfont", 32))
         if controller.result_detail and controller.result_detail ~= "" then
             table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(16) })
             table.insert(group, text_widget(controller.result_detail, "cfont", 24))

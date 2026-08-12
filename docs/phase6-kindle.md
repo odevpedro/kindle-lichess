@@ -487,3 +487,26 @@ e `ui/board.lua` coincidiu com o staging (`f852edeb00d1437629da260763b1dcdd2f2ee
 O rollback automático não foi acionado. O bridge e o socket permaneceram ausentes.
 O KOReader não foi reiniciado remotamente; é necessário reiniciá-lo manualmente para
 descartar os módulos Lua já carregados antes de repetir o seek.
+
+## Crash ao pintar o resultado da partida (2026-08-12)
+
+Uma partida live de seek pôde ser jogada quase até o final, mas a janela fechou quando
+o resultado chegou. O `crash.log` do KT4 registrou às 20:09:25 duas falhas ao carregar
+`./fonts/front`, seguidas por `frontend/ui/font.lua:386: attempt to index local 'face'`
+durante `UIManager:_repaint`; o KOReader reiniciou às 20:10:47. Não houve erro de rede,
+stream ou bridge nesse encerramento.
+
+A tela de resultado era o único ponto do plugin que solicitava
+`Font:getFace("front", 32)`. Essa face não existe no KOReader 2026.03/KindleBasic3;
+o fluxo chegava corretamente a `game_finish`, construía o widget com face nula e só
+falhava no repaint. A face foi trocada por `cfont`, já usada e validada no restante da
+interface do KT4.
+
+O teste KOReader agora instancia e pinta em framebuffer real as quatro classes de
+resultado: vitória branca por mate, vitória preta por desistência, empate e aborto.
+Isso cobre a etapa de pintura que o teste anterior não executava depois de chegar a
+`controller.view == "result"`.
+
+Também foi registrado no backlog P2 o placar visual de peças capturadas/material,
+sempre derivado de `initialFen + moves` confirmados, incluindo en passant, promoção,
+reconexão e histórico divergente, sem engine ou avaliação posicional.
