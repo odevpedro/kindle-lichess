@@ -43,6 +43,10 @@ check(#changed == 2 and changed[1] == "e2" and changed[2] == "e4", "dirty square
 local en_passant = assert(Position.reconstruct("startpos", "e2e4 a7a6 e4e5 d7d5 e5d6"))
 piece(en_passant, "d6", "p", "w")
 check(en_passant:piece_at("d5") == nil, "en passant captured pawn must be removed")
+check(#en_passant:captured_by("w") == 1 and en_passant:captured_by("w")[1].type == "p",
+    "en passant records the captured pawn")
+check(en_passant:material_advantage("w") == 1 and en_passant:material_advantage("b") == -1,
+    "material advantage reflects the confirmed board")
 
 local castled = assert(Position.reconstruct("startpos",
     "e2e4 e7e5 g1f3 b8c6 f1e2 g8f6 e1g1"))
@@ -56,6 +60,21 @@ local promotion_fen = "8/P3k3/8/8/8/8/7p/4K3 w - - 0 1"
 local promoted = assert(Position.reconstruct(promotion_fen, "a7a8q h2h1n"))
 piece(promoted, "a8", "q", "w")
 piece(promoted, "h1", "n", "b")
+
+local captured_promotion = assert(Position.reconstruct(
+    "1r2k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8q b8a8"))
+check(#captured_promotion:captured_by("b") == 1
+        and captured_promotion:captured_by("b")[1].type == "q",
+    "a promoted piece is recorded with its promoted type when captured")
+check(captured_promotion:material_advantage("b") == 5,
+    "promotion and capture use conventional current material values")
+
+local custom_capture = assert(Position.reconstruct(
+    "4k3/8/8/8/8/8/r3Q3/4K3 w - - 0 1", "e2a2"))
+check(#custom_capture:captured_by("w") == 1 and custom_capture:captured_by("w")[1].type == "r",
+    "custom initial positions count only pieces captured after initialFen")
+check(custom_capture:material_advantage("w") == 9,
+    "custom initial positions compute material from their current board")
 
 local illegal = assert(Position.from_fen("startpos"))
 local _, illegal_reason = illegal:apply_uci("e2e5")
@@ -160,6 +179,22 @@ local reconnected_event = assert(game_state:apply_game_state({
 }))
 check(reconnected_event.kind == "reconnected" and #reconnected_event.dirty == 64,
     "reconnection discards transient state and redraws all")
+
+local capture_state = GameState.new(Clock.new(function() return now end))
+assert(capture_state:apply_game_full({
+    initialFen = "startpos",
+    state = { moves = "e2e4 d7d5 e4d5 d8d5", wtime = 60000, btime = 60000, status = "started" },
+}))
+check(#capture_state.position:captured_by("w") == 1
+        and #capture_state.position:captured_by("b") == 1,
+    "game state reconstructs both players' capture ledgers")
+local reset_captures = assert(capture_state:apply_game_state({
+    moves = "d2d4", wtime = 59000, btime = 60000, status = "started",
+}))
+check(reset_captures.kind == "diverged"
+        and #capture_state.position:captured_by("w") == 0
+        and #capture_state.position:captured_by("b") == 0,
+    "divergent authoritative history replaces rather than accumulates captures")
 
 local protocol_ok, protocol_err = Protocol.validate_plugin({
     v = 1, type = "move", requestId = "req-1", gameId = "game01", move = "e2e4",

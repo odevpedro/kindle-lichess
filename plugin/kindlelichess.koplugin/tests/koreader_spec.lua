@@ -187,6 +187,8 @@ describe("Kindle Lichess KOReader integration", function()
         local framebuffer = require("ffi/blitbuffer").new(screen:getWidth(), screen:getHeight())
         session:paintTo(framebuffer, 0, 0)
         assert.equals("KindleTester  10:00", session.bottom_clock:getText())
+        assert.is_not_nil(session.top_captures)
+        assert.is_not_nil(session.bottom_captures)
         now = 25
         session.clock_callback()
         assert.equals("KindleTester  09:45", session.bottom_clock:getText())
@@ -199,6 +201,17 @@ describe("Kindle Lichess KOReader integration", function()
         assert.equals(2, #controller.game_state.moves)
         assert.equals("p", controller.game_state.position:piece_at("e4").type)
         assert.equals("p", controller.game_state.position:piece_at("e5").type)
+
+        assert.is_true(controller:handle({
+            v = 1, type = "game_state", gameId = controller.game.id,
+            state = {
+                moves = "e2e4 d7d5 e4d5", wtime = 590000, btime = 590000,
+                winc = 5000, binc = 5000, status = "started",
+            },
+        }))
+        assert.equals(1, #controller.game_state.position:captured_by("w"))
+        assert.matches("bp", session.bottom_captures._signature, 1, true)
+        session:paintTo(framebuffer, 0, 0)
 
         controller:simulate_disconnect()
         assert.equals("connected", controller.connection)

@@ -58,7 +58,8 @@ P0 bloqueia MVP; P1 robustez necessária; P2 pós-MVP.
 - P0 ✔ Corrigir crash ao renderizar o resultado no KT4: substituída a face inexistente
   `front` por `cfont`; teste de integração pinta de verdade as telas de vitória,
   derrota, empate e aborto para impedir regressão em `frontend/ui/font.lua`.
-- P2 exibir peças capturadas/material abaixo dos jogadores, no estilo Lichess/Chess.com.
+- P2 ◐ exibir peças capturadas/material abaixo dos jogadores, no estilo Lichess/Chess.com
+  (implementado localmente; aguarda validação visual no runtime KOReader e no KT4).
   Derivar exclusivamente de `initialFen + moves` confirmados pelo stream (sem avaliação
   ou engine), mostrar as peças perdidas por cada lado e, opcionalmente, a diferença
   material convencional. A reconstrução deve tratar capturas normais, en passant,

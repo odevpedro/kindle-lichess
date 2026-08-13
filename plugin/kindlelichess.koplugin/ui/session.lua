@@ -5,6 +5,7 @@ local Blitbuffer = require("ffi/blitbuffer")
 local Board = require("ui/board")
 local ButtonTable = require("ui/widget/buttontable")
 local CenterContainer = require("ui/widget/container/centercontainer")
+local CapturedPieces = require("ui/captured_pieces")
 local Clock = require("chess/clock")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
@@ -193,9 +194,16 @@ function Session:_build_game()
     local title = self:_title()
     self.top_clock = centered_text(self:_player_label(top_player, top_color), "cfont", 24)
     self.bottom_clock = centered_text(self:_player_label(bottom_player, bottom_color), "cfont", 24)
+    self.top_captures = CapturedPieces:new{
+        position = controller.game_state.position, color = top_color, show_parent = self,
+    }
+    self.bottom_captures = CapturedPieces:new{
+        position = controller.game_state.position, color = bottom_color, show_parent = self,
+    }
     self.status_widget = centered_text(controller.status_text, "smallinfofont", 20)
 
     local reserved = title:getSize().h + self.top_clock:getSize().h + self.bottom_clock:getSize().h
+        + self.top_captures:getSize().h + self.bottom_captures:getSize().h
         + self.status_widget:getSize().h + Screen:scaleBySize(86)
     local board_size = math.min(Screen:getWidth() - Screen:scaleBySize(8), Screen:getHeight() - reserved)
     board_size = math.max(Screen:scaleBySize(320), board_size)
@@ -240,8 +248,8 @@ function Session:_build_game()
 
     self:_schedule_clock()
     return VerticalGroup:new{
-        align = "center", title, self.top_clock, self.board,
-        self.bottom_clock, self.status_widget, actions,
+        align = "center", title, self.top_clock, self.top_captures, self.board,
+        self.bottom_clock, self.bottom_captures, self.status_widget, actions,
     }
 end
 
@@ -256,6 +264,7 @@ function Session:_rebuild()
     UIManager:unschedule(self.clock_callback)
     if self[1] then self[1]:free() end
     self.board, self.top_clock, self.bottom_clock, self.status_widget = nil, nil, nil, nil
+    self.top_captures, self.bottom_captures = nil, nil
     self.challenge_actions = nil
     self.lobby_actions = nil
     self.promotion_actions = nil
@@ -377,6 +386,8 @@ function Session:_controller_changed(event, payload)
         self.board:update(payload.position, payload.dirty,
             self.controller.selection.selected, self.controller.last_move,
             self.controller.selection:available_destinations())
+        self.top_captures:update(payload.position)
+        self.bottom_captures:update(payload.position)
         self:_refresh_status()
         self:_refresh_clocks()
         self.full_refresh_counter = self.full_refresh_counter + 1

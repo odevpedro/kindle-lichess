@@ -9,6 +9,8 @@ Position.START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 local valid_piece = { p = true, n = true, b = true, r = true, q = true, k = true }
 local valid_promotion = { q = true, r = true, b = true, n = true }
+local material_value = { p = 1, n = 3, b = 3, r = 5, q = 9, k = 0 }
+local captured_order = { q = 1, r = 2, b = 3, n = 4, p = 5 }
 
 local function copy_piece(piece)
     if not piece then return nil end
@@ -19,6 +21,16 @@ local function copy_board(board)
     local result = {}
     for square, piece in pairs(board) do
         result[square] = copy_piece(piece)
+    end
+    return result
+end
+
+local function copy_captures(captures)
+    local result = { w = {}, b = {} }
+    for _, color in ipairs({ "w", "b" }) do
+        for index, piece in ipairs(captures and captures[color] or {}) do
+            result[color][index] = copy_piece(piece)
+        end
     end
     return result
 end
@@ -130,6 +142,7 @@ function Position.from_fen(fen)
         halfmove = halfmove,
         fullmove = fullmove,
         moves = {},
+        captures = { w = {}, b = {} },
     }, Position)
 end
 
@@ -144,11 +157,33 @@ function Position:clone()
         halfmove = self.halfmove,
         fullmove = self.fullmove,
         moves = moves,
+        captures = copy_captures(self.captures),
     }, Position)
 end
 
 function Position:piece_at(square)
     return copy_piece(self.board[square])
+end
+
+-- Returns pieces captured by color since initialFen. Missing material in a
+-- custom initial position is deliberately not treated as captured.
+function Position:captured_by(color)
+    if color ~= "w" and color ~= "b" then return {} end
+    local result = copy_captures(self.captures)[color]
+    table.sort(result, function(left, right)
+        return captured_order[left.type] < captured_order[right.type]
+    end)
+    return result
+end
+
+function Position:material_advantage(color)
+    if color ~= "w" and color ~= "b" then return 0 end
+    local totals = { w = 0, b = 0 }
+    for _, piece in pairs(self.board) do
+        totals[piece.color] = totals[piece.color] + material_value[piece.type]
+    end
+    local opponent = color == "w" and "b" or "w"
+    return totals[color] - totals[opponent]
 end
 
 function Position:_path_clear(from_file, from_rank, to_file, to_rank)
@@ -301,9 +336,11 @@ function Position:_apply_unchecked(from, to, promotion, uci)
     local to_file, to_rank = square_coords(to)
     local dirty = { from, to }
     local is_capture = target ~= nil
+    local captured_piece = copy_piece(target)
 
     if piece.type == "p" and from_file ~= to_file and not target and to == self.en_passant then
         local captured_square = coords_square(to_file, from_rank)
+        captured_piece = copy_piece(self.board[captured_square])
         self.board[captured_square] = nil
         dirty[#dirty + 1] = captured_square
         is_capture = true
@@ -311,6 +348,9 @@ function Position:_apply_unchecked(from, to, promotion, uci)
 
     self.board[from] = nil
     self.board[to] = { type = promotion or piece.type, color = piece.color }
+    if captured_piece then
+        self.captures[piece.color][#self.captures[piece.color] + 1] = captured_piece
+    end
 
     if piece.type == "k" and math.abs(to_file - from_file) == 2 then
         local rook_from = coords_square(to_file > from_file and 8 or 1, from_rank)
