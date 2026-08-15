@@ -5,6 +5,7 @@ Não há implantação na Fase 0.
 ## Permitido
 
 - plugin/bridge: `/mnt/us/koreader/plugins/kindlelichess.koplugin`;
+- partidas PGN exportadas pelo usuário: `/mnt/us/documents/KindleLichess/`;
 - dados persistentes não secretos: subdiretório próprio resolvido por `DataStorage:getDataDir()`;
 - temporários/socket/token privado da sessão: `/tmp`.
 

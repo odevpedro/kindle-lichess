@@ -8,29 +8,36 @@ local plugin_types = {
     open_game = true, close_game = true, move = true, offer_draw = true,
     accept_draw = true, decline_draw = true, resign = true, abort = true,
     seek = true, cancel_seek = true, create_challenge = true, cancel_challenge = true,
-    ping = true,
+    send_chat = true, ping = true,
 }
 
 local server_types = {
     connected = true, challenge = true, challenge_canceled = true, challenge_declined = true,
     game_start = true, game_finish = true, game_full = true, game_state = true,
     opponent_gone = true, command_ok = true, move_rejected = true, reconnecting = true,
-    disconnected = true, error = true, pong = true,
+    disconnected = true, error = true, pong = true, chat_line = true,
 }
 
 local mutating_commands = {
     accept_challenge = true, decline_challenge = true, move = true, offer_draw = true,
     accept_draw = true, decline_draw = true, resign = true, abort = true,
     seek = true, cancel_seek = true, create_challenge = true, cancel_challenge = true,
+    send_chat = true,
 }
 
 local game_commands = {
     open_game = true, close_game = true, move = true, offer_draw = true,
     accept_draw = true, decline_draw = true, resign = true, abort = true,
+    send_chat = true,
 }
 
 local function bounded_string(value, minimum, maximum)
     return type(value) == "string" and #value >= minimum and #value <= maximum
+end
+
+local function valid_chat_text(value, maximum)
+    return bounded_string(value, 1, maximum) and value:match("^%s*$") == nil
+        and value:find("[%z\1-\31\127]") == nil
 end
 
 local function ascii_id(value, maximum)
@@ -48,6 +55,20 @@ local function valid_uci(value)
     if not value:sub(1, 2):match("^[a-h][1-8]$")
             or not value:sub(3, 4):match("^[a-h][1-8]$") then return false end
     return #value == 4 or value:sub(5, 5):match("^[qrbn]$") ~= nil
+end
+
+local function valid_time_control(value, seek)
+    if type(value) ~= "string" then return false end
+    local limit, increment = value:match("^(%d+)%+(%d+)$")
+    limit, increment = tonumber(limit), tonumber(increment)
+    if not limit or not increment then return false end
+    if seek then
+        return limit <= 10800 and increment <= 180 and limit + 40 * increment >= 600
+    end
+    local valid_limit = limit == 0 or limit == 15 or limit == 30 or limit == 45
+        or limit == 60 or limit == 90
+        or (limit >= 120 and limit <= 10800 and limit % 60 == 0)
+    return valid_limit and increment <= 60 and limit + 40 * increment >= 180
 end
 
 local function contains_secret(value, depth)
@@ -102,15 +123,18 @@ function Protocol.validate_plugin(message)
         return nil, "invalid_challenge_id"
     end
     if kind == "move" and not valid_uci(message.move) then return nil, "invalid_move" end
-    if kind == "seek" and (message.timeControl == nil
-            or not bounded_string(message.timeControl, 1, 32)) then
+    if kind == "seek" and not valid_time_control(message.timeControl, true) then
         return nil, "invalid_time_control"
     end
     if kind == "create_challenge" then
         if not valid_username(message.username) then return nil, "invalid_username" end
-        if message.timeControl == nil or not bounded_string(message.timeControl, 1, 32) then
+        if not valid_time_control(message.timeControl, false) then
             return nil, "invalid_time_control"
         end
+    end
+    if kind == "send_chat" then
+        if message.room ~= "player" then return nil, "invalid_chat_room" end
+        if not valid_chat_text(message.text, 280) then return nil, "invalid_chat_text" end
     end
     if kind == "decline_challenge" and message.reason ~= nil
             and not bounded_string(message.reason, 1, 64) then
@@ -146,6 +170,12 @@ function Protocol.validate_server(message)
     elseif kind == "game_state" then
         if not ascii_id(message.gameId, 32) or not valid_game_state(message.state) then
             return nil, "invalid_game_state"
+        end
+    elseif kind == "chat_line" then
+        if not ascii_id(message.gameId, 32) or message.room ~= "player"
+                or not bounded_string(message.username, 1, 64)
+                or not valid_chat_text(message.text, 1024) then
+            return nil, "invalid_chat_line"
         end
     elseif kind == "command_ok" then
         if not ascii_id(message.requestId, 64) or not bounded_string(message.command, 1, 64) then

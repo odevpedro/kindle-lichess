@@ -5,6 +5,7 @@ local Controller = require("controller")
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
 local MockBridge = require("bridge/mock_bridge")
+local PgnExport = require("storage/pgn_export")
 local Session = require("ui/session")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -42,6 +43,11 @@ function KindleLichess:addToMainMenu(menu_items)
                 text = _("Open Kindle Lichess"),
                 keep_menu_open = false,
                 callback = function() self:open() end,
+            },
+            {
+                text = _("Free board"),
+                keep_menu_open = false,
+                callback = function() self:open_free_board() end,
             },
             {
                 text = _("Mock mode"),
@@ -107,9 +113,20 @@ end
 
 function KindleLichess:open()
     if self.session then return end
+    local pgn_directory = self.pgn_directory
+        or G_reader_settings:readSetting("kindlelichess_pgn_directory")
+        or "/mnt/us/documents/KindleLichess"
     local controller = Controller.new{
         monotonic_now = function()
             return time.to_number(time.boottime_or_realtime_coarse())
+        end,
+        time_control = G_reader_settings:readSetting("kindlelichess_time_control") or "600+5",
+        save_time_control = function(value)
+            G_reader_settings:saveSetting("kindlelichess_time_control", value)
+        end,
+        pgn_directory = pgn_directory,
+        pgn_writer = function(directory, game, content)
+            return PgnExport.save(directory, game, content)
         end,
     }
     local bridge = self:_new_bridge(controller)
@@ -120,6 +137,21 @@ function KindleLichess:open()
     }
     UIManager:show(self.session, "flashui")
     controller:start()
+end
+
+function KindleLichess:open_free_board()
+    if self.session then return end
+    local controller = Controller.new{
+        monotonic_now = function()
+            return time.to_number(time.boottime_or_realtime_coarse())
+        end,
+    }
+    self.session = Session:new{
+        controller = controller,
+        on_close = function() self.session = nil end,
+    }
+    UIManager:show(self.session, "flashui")
+    controller:start_free_board()
 end
 
 return KindleLichess

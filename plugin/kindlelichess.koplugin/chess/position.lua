@@ -146,6 +146,53 @@ function Position.from_fen(fen)
     }, Position)
 end
 
+function Position.empty()
+    return setmetatable({
+        board = {}, turn = "w", castling = "-", en_passant = "-",
+        halfmove = 0, fullmove = 1, moves = {}, captures = { w = {}, b = {} },
+    }, Position)
+end
+
+function Position:set_piece(square, color, piece_type)
+    if not Position.is_square(square) then return nil, "bad_square" end
+    if color == nil and piece_type == nil then
+        self.board[square] = nil
+        self.moves, self.captures = {}, { w = {}, b = {} }
+        return { square }
+    end
+    if (color ~= "w" and color ~= "b") or not valid_piece[piece_type] then
+        return nil, "bad_piece"
+    end
+    self.board[square] = { color = color, type = piece_type }
+    self.moves, self.captures = {}, { w = {}, b = {} }
+    return { square }
+end
+
+function Position:move_piece_unchecked(from, to)
+    if not Position.is_square(from) or not Position.is_square(to) then return nil, "bad_square" end
+    if from == to then return { from } end
+    local piece = self.board[from]
+    if not piece then return nil, "empty_origin" end
+    self.board[from], self.board[to] = nil, copy_piece(piece)
+    self.moves, self.captures = {}, { w = {}, b = {} }
+    return { from, to }
+end
+
+function Position:clear_board()
+    local dirty = {}
+    for square in pairs(self.board) do dirty[#dirty + 1] = square end
+    self.board, self.moves, self.captures = {}, {}, { w = {}, b = {} }
+    self.castling, self.en_passant, self.halfmove, self.fullmove = "-", "-", 0, 1
+    table.sort(dirty)
+    return dirty
+end
+
+function Position:set_turn(color)
+    if color ~= "w" and color ~= "b" then return nil, "bad_turn" end
+    self.turn = color
+    return true
+end
+
 function Position:clone()
     local moves = {}
     for i, move in ipairs(self.moves) do moves[i] = move end

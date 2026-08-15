@@ -5,9 +5,11 @@ package.path = "./plugin/kindlelichess.koplugin/?.lua;"
     .. "./plugin/kindlelichess.koplugin/?/?.lua;" .. package.path
 
 local Position = require("chess/position")
+local Pgn = require("chess/pgn")
 local Selection = require("chess/selection")
 local Clock = require("chess/clock")
 local GameState = require("chess/game_state")
+local TimeControl = require("chess/time_control")
 local BoardGeometry = require("ui/board_geometry")
 local Controller = require("controller")
 local MockBridge = require("bridge/mock_bridge")
@@ -206,6 +208,15 @@ local _, version_err = Protocol.validate_server({ v = 2, type = "disconnected", 
 check(version_err == "unsupported_version", "unsupported protocol version")
 local _, unknown_err = Protocol.validate_server({ v = 1, type = "future_message" })
 check(unknown_err == "unknown_type", "unknown message type")
+check(Protocol.validate_plugin({ v = 1, type = "send_chat", requestId = "chat-1",
+    gameId = "game01", room = "player", text = "Boa partida!" }) == true,
+    "player chat command is valid")
+local _, bad_room_err = Protocol.validate_plugin({ v = 1, type = "send_chat",
+    requestId = "chat-2", gameId = "game01", room = "spectator", text = "oi" })
+check(bad_room_err == "invalid_chat_room", "spectator chat is not exposed")
+local _, bad_chat_err = Protocol.validate_plugin({ v = 1, type = "send_chat",
+    requestId = "chat-3", gameId = "game01", room = "player", text = "oi\n" })
+check(bad_chat_err == "invalid_chat_text", "chat rejects control characters")
 
 local controller_events = {}
 local controller = Controller.new({
@@ -220,6 +231,18 @@ check(controller.view == "challenge" and controller.challenge.id == "mockchallen
 assert(controller:accept_challenge())
 check(controller.view == "game" and controller.game.id == "mockgame01", "accept opens gameFull")
 check(controller.game_state.position:piece_at("e2").type == "p", "game starts from server snapshot")
+assert(controller:send_chat("  Boa partida!  "))
+check(#controller.chat_messages == 1 and controller.chat_messages[1].text == "Boa partida!"
+        and controller.chat_unread == 0 and controller.chat_pending == false,
+    "own chat message is streamed back without becoming unread")
+assert(mock:simulate_chat("Bom jogo!"))
+check(#controller.chat_messages == 2 and controller.chat_messages[2].username == "MockOpponent"
+        and controller.chat_unread == 1 and controller:chat_label() == "Chat (1)",
+    "opponent chat message increments unread count")
+check(controller:chat_transcript(2):find("MockOpponent: Bom jogo!", 1, true) ~= nil,
+    "chat transcript includes the opponent message")
+assert(controller:mark_chat_read())
+check(controller.chat_unread == 0 and controller:chat_label() == "Chat", "opening chat marks it read")
 controller:tap_square("e2")
 controller:tap_square("e4")
 piece(controller.game_state.position, "e4", "p", "w")
@@ -480,5 +503,91 @@ pending_mock:close()
 check(#queued == 2 and canceled[queued[1]] and canceled[queued[2]],
     "closing mock cancels every scheduled event")
 check(next(pending_mock.scheduled) == nil, "closing mock leaves no pending task references")
+
+local custom_time = assert(TimeControl.parse_user("5+10"))
+check(custom_time.limit == 300 and custom_time.increment == 10,
+    "custom time parses minutes and increment")
+check(TimeControl.display(custom_time) == "5+10", "custom time round-trips for display")
+check(TimeControl.validate_seek(custom_time) == true, "5+10 is a valid rapid seek")
+local too_fast, too_fast_err = TimeControl.validate_seek(assert(TimeControl.parse_user("5+0")))
+check(not too_fast and too_fast_err == "board_api_too_fast",
+    "public Board API seek rejects blitz")
+check(TimeControl.validate_challenge(assert(TimeControl.parse_user("5+0"))) == true,
+    "direct Board API challenge accepts blitz")
+
+local editor = Position.empty()
+assert(editor:set_piece("e1", "w", "k"))
+assert(editor:set_piece("e8", "b", "k"))
+assert(editor:set_piece("a2", "w", "q"))
+assert(editor:move_piece_unchecked("a2", "h7"))
+piece(editor, "h7", "q", "w")
+assert(editor:set_turn("b"))
+check(editor:to_fen() == "4k3/7Q/8/8/8/8/8/4K3 b - - 0 1",
+    "free board serializes an edited position")
+editor:clear_board()
+check(next(editor.board) == nil, "free board can be cleared")
+
+local pgn_game = {
+    id = "pgn01", initialFen = "startpos", rated = false,
+    white = { username = "White", rating = 1500 },
+    black = { username = "Black", rating = 1510 },
+}
+local pgn = assert(Pgn.generate(pgn_game, { "e2e4", "e7e5", "g1f3" },
+    { status = "resign", winner = "w" }, { date = "2026.08.14" }))
+check(pgn:find('[Site "https://lichess.org/pgn01"]', 1, true) ~= nil,
+    "PGN links to the Lichess game")
+check(pgn:find("1. e4 e5 2. Nf3 1-0", 1, true) ~= nil,
+    "PGN converts confirmed UCI history to SAN movetext")
+
+local saved_path, saved_content
+local history_controller = Controller.new({
+    monotonic_now = function() return now end,
+    pgn_writer = function(_, _, content)
+        saved_content = content
+        saved_path = "/mnt/us/documents/KindleLichess/test.pgn"
+        return saved_path
+    end,
+})
+history_controller.closed = false
+assert(history_controller:handle({
+    v = 1, type = "game_full", gameId = "history01", state = {
+        id = "history01", variant = "standard", speed = "rapid", rated = false,
+        color = "w", initialFen = "startpos",
+        white = { username = "White" }, black = { username = "Black" },
+        state = { moves = "e2e4 e7e5", wtime = 590000, btime = 590000,
+            winc = 5000, binc = 5000, status = "started" },
+    },
+}))
+assert(history_controller:history_back())
+local history_index, history_maximum = history_controller:history_index()
+check(history_index == 1 and history_maximum == 2,
+    "history back reviews the previous confirmed ply")
+piece(history_controller:display_position(), "e4", "p", "w")
+check(history_controller:display_position():piece_at("e5") == nil,
+    "review position excludes later moves")
+check(history_controller:tap_square("e4").reason == "reviewing_history",
+    "review mode cannot submit a live move")
+assert(history_controller:history_forward())
+check(history_controller.review_index == nil
+        and history_controller:display_position():piece_at("e5") ~= nil,
+    "history forward returns to the live position")
+assert(history_controller:handle({
+    v = 1, type = "game_finish",
+    game = { id = "history01", status = "resign", winner = "w" },
+}))
+assert(history_controller:history_back())
+check(history_controller:history_index() == 1, "finished games remain reviewable")
+check(history_controller:save_pgn_file() == saved_path
+        and saved_content:find("1. e4 e5 1-0", 1, true),
+    "finished game exports its confirmed history as PGN")
+
+local free_controller = Controller.new({ monotonic_now = function() return now end })
+assert(free_controller:start_free_board())
+assert(free_controller:free_select_tool("erase"))
+assert(free_controller:free_tap_square("a2"))
+check(free_controller.free_position:piece_at("a2") == nil,
+    "free-board erase tool removes a piece without Lichess")
+assert(free_controller:free_import_fen("4k3/8/8/8/8/8/8/4K3 b - - 0 1"))
+check(free_controller.free_position.turn == "b", "free board imports all FEN state")
 
 print(string.format("ok - %d checks", count))

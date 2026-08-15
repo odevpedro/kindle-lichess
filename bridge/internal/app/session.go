@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ type API interface {
 	CreateChallenge(context.Context, string, lichess.ChallengeOptions) error
 	CancelChallenge(context.Context, string) error
 	Move(context.Context, string, string) error
+	Chat(context.Context, string, string, string) error
 	Draw(context.Context, string, bool) error
 	Resign(context.Context, string) error
 	Abort(context.Context, string) error
@@ -325,6 +327,28 @@ func (s *Session) handleGameEvent(gameID string, event lichess.RawEvent) (bool, 
 		return terminal, s.send(map[string]any{
 			"v": 1, "type": "game_state", "gameId": gameID, "state": state,
 		})
+	case "chatLine":
+		var line struct {
+			Room     string `json:"room"`
+			Username string `json:"username"`
+			Text     string `json:"text"`
+		}
+		if err := json.Unmarshal(event.JSON, &line); err != nil {
+			return false, &lichess.APIError{Code: "invalid_response"}
+		}
+		// Kindle Lichess exposes only the private player-to-player room.
+		if line.Room != "player" {
+			return false, nil
+		}
+		// Malformed chat is dropped without logging its private contents or
+		// interrupting/reconnecting the chess stream.
+		if !safeChatField(line.Username, 64) || !safeChatField(line.Text, 1024) {
+			return false, nil
+		}
+		return false, s.send(map[string]any{
+			"v": 1, "type": "chat_line", "gameId": gameID,
+			"room": line.Room, "username": line.Username, "text": line.Text,
+		})
 	case "opponentGone":
 		var gone struct {
 			Gone              bool `json:"gone"`
@@ -394,6 +418,10 @@ func (s *Session) mutate(ctx context.Context, command protocol.Command) error {
 		operation = func(ctx context.Context) error {
 			return s.api.Move(ctx, command.GameID, command.Move)
 		}
+	case "send_chat":
+		operation = func(ctx context.Context) error {
+			return s.api.Chat(ctx, command.GameID, command.Room, command.Text)
+		}
 	case "offer_draw", "accept_draw":
 		operation = func(ctx context.Context) error {
 			return s.api.Draw(ctx, command.GameID, true)
@@ -414,6 +442,10 @@ func (s *Session) mutate(ctx context.Context, command protocol.Command) error {
 	var err error
 	if operation == nil {
 		err = errors.New("unknown mutation")
+	} else if command.Type == "send_chat" {
+		// A timed-out POST may already have published the message. Never retry it
+		// automatically and risk duplicate/spam.
+		err = operation(ctx)
 	} else {
 		err = s.runRequest(ctx, operation)
 	}
@@ -452,6 +484,18 @@ func (s *Session) runRequest(ctx context.Context, operation func(context.Context
 		}
 	}
 	return err
+}
+
+func safeChatField(value string, maximum int) bool {
+	if len(value) < 1 || len(value) > maximum || strings.TrimSpace(value) == "" {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if character < 32 || character == 127 {
+			return false
+		}
+	}
+	return true
 }
 
 func requestRetryDecision(err error) (bool, time.Duration) {

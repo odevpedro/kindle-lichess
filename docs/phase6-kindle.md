@@ -510,3 +510,31 @@ Isso cobre a etapa de pintura que o teste anterior não executava depois de cheg
 Também foi registrado no backlog P2 o placar visual de peças capturadas/material,
 sempre derivado de `initialFen + moves` confirmados, incluindo en passant, promoção,
 reconexão e histórico divergente, sem engine ou avaliação posicional.
+
+## Histórico, PGN, tempo, tabuleiro livre e chat instalados (2026-08-14)
+
+Foram implementados e empacotados em conjunto: navegação de lances com `<`/`>`,
+exportação PGN atômica em `/mnt/us/documents/KindleLichess/`, controles de tempo
+personalizados, tabuleiro livre offline e chat privado `player` durante partidas
+ativas. O spike do chat resultou em `GO`; o texto fica somente em memória, mensagens
+de espectadores são ignoradas e POSTs incertos não são repetidos automaticamente.
+
+Validação local:
+
+- Lua: 167/167 verificações;
+- Go: 8/8 pacotes com `go test -race`;
+- `git diff --check` e scripts shell sem erros;
+- bridge ARMv7 estático: SHA-256
+  `8bbd63177d6b53a7db4a242f06048f405c58782b445d0f884a34c1033fa0ee80`;
+- pacote reproduzido duas vezes com 2.627.034 bytes e SHA-256
+  `11eccd9654775b7f3ab40d3a65880eab0a146535c0bd4302865e20b3de7bc5ce`.
+
+Após autorização explícita, o pacote foi enviado ao KT4 e extraído em staging dentro
+da área de plugins, pois o tmpfs tinha apenas cerca de 9 MiB livres. Staging e destino
+passaram 37/37 hashes. O plugin anterior permanece recuperável em
+`/mnt/us/koreader/plugins/.kindlelichess-backup-pre-11eccd96`; nenhum rollback foi
+necessário. O token real em `/tmp/kindle-lichess-token` foi preservado sem leitura,
+com modo 0600 e o mesmo tamanho observado. O novo bridge iniciou nativamente no ARMv7,
+criou o socket de teste e encerrou de forma limpa com credencial fictícia, sem HTTPS.
+O KOReader não foi reiniciado remotamente; um reinício manual ainda é necessário para
+descartar módulos Lua da versão anterior já carregados.

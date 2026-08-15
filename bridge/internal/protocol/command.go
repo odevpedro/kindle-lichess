@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -28,6 +29,8 @@ type Command struct {
 	Rated       bool   `json:"rated,omitempty"`
 	TimeControl string `json:"timeControl,omitempty"`
 	Username    string `json:"username,omitempty"`
+	Room        string `json:"room,omitempty"`
+	Text        string `json:"text,omitempty"`
 	Nonce       string `json:"nonce,omitempty"`
 }
 
@@ -37,7 +40,8 @@ var commandTypes = map[string]bool{
 	"move": true, "offer_draw": true, "accept_draw": true,
 	"decline_draw": true, "resign": true, "abort": true, "seek": true,
 	"cancel_seek": true, "create_challenge": true, "cancel_challenge": true,
-	"ping": true,
+	"send_chat": true,
+	"ping":      true,
 }
 
 var mutatingCommands = map[string]bool{
@@ -45,11 +49,13 @@ var mutatingCommands = map[string]bool{
 	"offer_draw": true, "accept_draw": true, "decline_draw": true,
 	"resign": true, "abort": true, "seek": true, "cancel_seek": true,
 	"create_challenge": true, "cancel_challenge": true,
+	"send_chat": true,
 }
 
 var gameCommands = map[string]bool{
 	"open_game": true, "close_game": true, "move": true, "offer_draw": true,
 	"accept_draw": true, "decline_draw": true, "resign": true, "abort": true,
+	"send_chat": true,
 }
 
 type ValidationError struct {
@@ -150,19 +156,57 @@ func ValidateCommand(command Command) error {
 	if command.Type == "decline_challenge" && command.Reason != "" && len(command.Reason) > 64 {
 		return invalid("invalid_reason")
 	}
-	if command.Type == "seek" && (len(command.TimeControl) < 1 || len(command.TimeControl) > 32) {
-		return invalid("invalid_time_control")
+	if command.Type == "seek" {
+		if !validTimeControl(command.TimeControl, true) {
+			return invalid("invalid_time_control")
+		}
 	}
 	if command.Type == "create_challenge" && !validUsername(command.Username) {
 		return invalid("invalid_username")
 	}
-	if command.Type == "create_challenge" && (len(command.TimeControl) < 1 || len(command.TimeControl) > 32) {
+	if command.Type == "create_challenge" && !validTimeControl(command.TimeControl, false) {
 		return invalid("invalid_time_control")
+	}
+	if command.Type == "send_chat" && command.Room != "player" {
+		return invalid("invalid_chat_room")
+	}
+	if command.Type == "send_chat" && !validChatText(command.Text) {
+		return invalid("invalid_chat_text")
 	}
 	if command.Type == "ping" && (len(command.Nonce) < 1 || len(command.Nonce) > 64) {
 		return invalid("invalid_nonce")
 	}
 	return nil
+}
+
+func validChatText(value string) bool {
+	if len(value) < 1 || len(value) > 280 || strings.TrimSpace(value) == "" {
+		return false
+	}
+	for _, character := range []byte(value) {
+		if character < 32 || character == 127 {
+			return false
+		}
+	}
+	return true
+}
+
+func validTimeControl(value string, seek bool) bool {
+	parts := strings.Split(value, "+")
+	if len(parts) != 2 {
+		return false
+	}
+	limit, limitErr := strconv.Atoi(parts[0])
+	increment, incrementErr := strconv.Atoi(parts[1])
+	if limitErr != nil || incrementErr != nil || limit < 0 || increment < 0 {
+		return false
+	}
+	if seek {
+		return limit <= 10800 && increment <= 180 && limit+40*increment >= 600
+	}
+	validLimit := limit == 0 || limit == 15 || limit == 30 || limit == 45 ||
+		limit == 60 || limit == 90 || (limit >= 120 && limit <= 10800 && limit%60 == 0)
+	return validLimit && increment <= 60 && limit+40*increment >= 180
 }
 
 func validID(value string, maximum int) bool {

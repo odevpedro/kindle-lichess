@@ -167,12 +167,15 @@ func (c *Client) StartSeek(ctx context.Context, options SeekOptions) (io.ReadClo
 	} else {
 		values.Set("rated", "false")
 	}
-	if options.TimeControl != "" {
-		values.Set("timeControl", options.TimeControl)
+	if limit, increment, ok := c.splitTimeControl(options.TimeControl); ok {
+		minutes := strconv.FormatFloat(float64(limit)/60, 'f', -1, 64)
+		values.Set("time", minutes)
+		values.Set("increment", strconv.Itoa(increment))
+	} else {
+		return nil, errors.New("invalid_time_control")
 	}
 	values.Set("variant", "standard")
 	values.Set("color", "random")
-	values.Set("keepAliveStream", "true")
 	response, err := c.do(ctx, http.MethodPost, "/api/board/seek", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
 	if err != nil {
 		return nil, err
@@ -194,8 +197,8 @@ type ChallengeOptions struct {
 }
 
 // CreateChallenge sends a direct challenge to a specific username. Casual games with
-// a clock are expressed as timeControl in "limit+increment" seconds (or "0+1" for
-// unlimited), which is converted to the clock.limit/clock.increment form fields.
+// a clock are expressed as timeControl in "limit+increment" seconds, which is
+// converted to the clock.limit/clock.increment form fields.
 func (c *Client) CreateChallenge(ctx context.Context, username string, options ChallengeOptions) error {
 	values := url.Values{}
 	if options.Rated {
@@ -203,7 +206,7 @@ func (c *Client) CreateChallenge(ctx context.Context, username string, options C
 	} else {
 		values.Set("rated", "false")
 	}
-	if options.TimeControl != "" && options.TimeControl != "0+1" {
+	if options.TimeControl != "" {
 		if limit, increment, ok := c.splitTimeControl(options.TimeControl); ok {
 			values.Set("clock.limit", strconv.Itoa(limit))
 			values.Set("clock.increment", strconv.Itoa(increment))
@@ -230,6 +233,13 @@ func (*Client) splitTimeControl(value string) (int, int, bool) {
 
 func (c *Client) Move(ctx context.Context, gameID, move string) error {
 	return c.mutate(ctx, "/api/board/game/"+url.PathEscape(gameID)+"/move/"+url.PathEscape(move), "")
+}
+
+func (c *Client) Chat(ctx context.Context, gameID, room, text string) error {
+	values := url.Values{}
+	values.Set("room", room)
+	values.Set("text", text)
+	return c.mutate(ctx, "/api/board/game/"+url.PathEscape(gameID)+"/chat", values.Encode())
 }
 
 func (c *Client) Draw(ctx context.Context, gameID string, accept bool) error {

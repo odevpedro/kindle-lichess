@@ -3,7 +3,10 @@
 
 local Clock = require("chess/clock")
 local GameState = require("chess/game_state")
+local Pgn = require("chess/pgn")
+local Position = require("chess/position")
 local Protocol = require("bridge/protocol")
+local TimeControl = require("chess/time_control")
 local Selection = require("chess/selection")
 
 local Controller = {}
@@ -74,6 +77,8 @@ end
 
 function Controller.new(options)
     options = options or {}
+    local time_control = TimeControl.parse_wire(options.time_control or "600+5")
+        or { limit = 600, increment = 5 }
     return setmetatable({
         monotonic_now = assert(options.monotonic_now, "monotonic clock is required"),
         on_change = options.on_change or function() end,
@@ -94,6 +99,19 @@ function Controller.new(options)
         result = nil,
         result_summary = nil,
         result_detail = nil,
+        review_index = nil,
+        review_position = nil,
+        time_control = time_control,
+        save_time_control = options.save_time_control or function() end,
+        pgn_writer = options.pgn_writer,
+        pgn_directory = options.pgn_directory or "/mnt/us/documents/KindleLichess",
+        chat_messages = {},
+        chat_unread = 0,
+        chat_pending = false,
+        chat_request_id = nil,
+        free_position = nil,
+        free_selected = nil,
+        free_tool = "move",
         awaiting_reconnect_snapshot = false,
         closed = true,
     }, Controller)
@@ -169,6 +187,7 @@ end
 
 function Controller:tap_square(square)
     if self.view ~= "game" or not self.selection then return { type = "ignored", reason = "no_game" } end
+    if self.review_index ~= nil then return { type = "ignored", reason = "reviewing_history" } end
     local action = self.selection:tap(square)
     if action.type == "promotion" then
         self.promotion = { from = action.from, to = action.to }
@@ -227,12 +246,34 @@ function Controller:abort()
     return self:_send({ type = "abort", requestId = self:_request_id(), gameId = self.game.id })
 end
 
+function Controller:time_control_label()
+    return TimeControl.display(self.time_control)
+end
+
+function Controller:set_time_control(value)
+    local control, parse_err = TimeControl.parse_user(value)
+    if not control then return nil, parse_err end
+    local challenge_valid, challenge_err = TimeControl.validate_challenge(control)
+    local seek_valid, seek_err = TimeControl.validate_seek(control)
+    if not challenge_valid and not seek_valid then return nil, challenge_err or seek_err end
+    self.time_control = control
+    local wire = assert(TimeControl.to_wire(control))
+    self.save_time_control(wire)
+    self.status_text = "Tempo definido: " .. TimeControl.display(control)
+    self:_notify("time_control", { value = wire })
+    return true
+end
+
 function Controller:seek_game()
     if self.view ~= "lobby" then return nil, "not_in_lobby" end
+    local valid, valid_err = TimeControl.validate_seek(self.time_control)
+    if not valid then return nil, valid_err end
+    local label = TimeControl.display(self.time_control)
     self.seeking = true
-    self.status_text = "Procurando adversário (10+5 casual)…"
+    self.status_text = "Procurando adversário (" .. label .. " casual)…"
     self:_notify("status")
-    return self:_send({ type = "seek", requestId = self:_request_id(), rated = false, timeControl = "600+5" })
+    return self:_send({ type = "seek", requestId = self:_request_id(), rated = false,
+        timeControl = assert(TimeControl.to_wire(self.time_control)) })
 end
 
 function Controller:cancel_seek()
@@ -245,12 +286,15 @@ end
 
 function Controller:create_challenge(username)
     if self.view ~= "lobby" then return nil, "not_in_lobby" end
+    local valid, valid_err = TimeControl.validate_challenge(self.time_control)
+    if not valid then return nil, valid_err end
     self.challenging = true
     self.status_text = "Desafiando " .. tostring(username) .. "…"
     self:_notify("status")
     return self:_send({
         type = "create_challenge", requestId = self:_request_id(),
-        username = tostring(username), rated = false, timeControl = "600+5",
+        username = tostring(username), rated = false,
+        timeControl = assert(TimeControl.to_wire(self.time_control)),
     })
 end
 
@@ -265,8 +309,209 @@ function Controller:cancel_challenge()
     })
 end
 
+function Controller:_position_at(index)
+    if not self.game_state or not self.game then return nil, "no_game" end
+    local moves = {}
+    for move_index = 1, index do moves[move_index] = self.game_state.moves[move_index] end
+    return Position.reconstruct(self.game.initialFen or "startpos", moves)
+end
+
+function Controller:history_index()
+    if not self.game_state then return 0, 0 end
+    return self.review_index or #self.game_state.moves, #self.game_state.moves
+end
+
+function Controller:display_position()
+    return self.review_position or (self.game_state and self.game_state.position)
+end
+
+function Controller:display_last_move()
+    local index = self:history_index()
+    local move = self.game_state and self.game_state.moves[index]
+    return move and { from = move:sub(1, 2), to = move:sub(3, 4), uci = move } or nil
+end
+
+function Controller:_set_history_index(index)
+    if not self.game_state or (self.view ~= "game" and self.view ~= "result") then
+        return nil, "no_game"
+    end
+    local maximum = #self.game_state.moves
+    index = math.max(0, math.min(maximum, index))
+    if self.view == "game" and index == maximum then
+        self.review_index, self.review_position = nil, nil
+    else
+        local position, err = self:_position_at(index)
+        if not position then return nil, err end
+        self.review_index, self.review_position = index, position
+    end
+    if self.selection then self.selection.selected = nil end
+    self.promotion = nil
+    self:_notify("history", {
+        index = index, maximum = maximum, position = self:display_position(),
+    })
+    return true
+end
+
+function Controller:history_back()
+    local index = self:history_index()
+    return self:_set_history_index(index - 1)
+end
+
+function Controller:history_forward()
+    local index, maximum = self:history_index()
+    return self:_set_history_index(math.min(maximum, index + 1))
+end
+
+function Controller:save_pgn_file()
+    if self.view ~= "result" or not self.game_state or not self.result then
+        return nil, "game_not_finished"
+    end
+    if not self.pgn_writer then return nil, "pgn_writer_unavailable" end
+    local content, generate_err = Pgn.generate(self.game, self.game_state.moves, self.result)
+    if not content then return nil, generate_err end
+    local path, write_err = self.pgn_writer(self.pgn_directory, self.game, content)
+    if not path then return nil, write_err end
+    self.status_text = "PGN salvo em " .. path
+    self:_notify("pgn_saved", { path = path })
+    return path
+end
+
+function Controller:chat_label()
+    return self.chat_unread > 0 and ("Chat (" .. tostring(self.chat_unread) .. ")") or "Chat"
+end
+
+function Controller:chat_transcript(limit)
+    limit = math.max(1, tonumber(limit) or 12)
+    local lines = {}
+    local first = math.max(1, #self.chat_messages - limit + 1)
+    for index = first, #self.chat_messages do
+        local message = self.chat_messages[index]
+        lines[#lines + 1] = tostring(message.username) .. ": " .. tostring(message.text)
+    end
+    return #lines > 0 and table.concat(lines, "\n\n") or "Nenhuma mensagem nesta partida."
+end
+
+function Controller:mark_chat_read(silent)
+    if self.chat_unread == 0 then return true end
+    self.chat_unread = 0
+    if not silent then self:_notify("chat_read") end
+    return true
+end
+
+function Controller:send_chat(text)
+    if not self.bridge or not self.game or self.view ~= "game" then
+        return nil, "chat_unavailable"
+    end
+    if self.chat_pending then return nil, "chat_pending" end
+    if type(text) ~= "string" then return nil, "invalid_chat_text" end
+    text = text:gsub("^%s+", ""):gsub("%s+$", "")
+    if text == "" then return nil, "invalid_chat_text" end
+    local request_id = self:_request_id()
+    self.chat_pending, self.chat_request_id = true, request_id
+    local ok, err = self:_send({
+        type = "send_chat", requestId = request_id, gameId = self.game.id,
+        room = "player", text = text,
+    })
+    if not ok then
+        self.chat_pending, self.chat_request_id = false, nil
+        return nil, err
+    end
+    self:_notify("chat_sending", { text = text })
+    return true
+end
+
 function Controller:simulate_disconnect()
     if self.bridge and self.bridge.simulate_disconnect then self.bridge:simulate_disconnect() end
+end
+
+function Controller:start_free_board()
+    self.closed = false
+    self.view, self.connection = "free_board", "offline"
+    self.status_text = "Tabuleiro livre — mover peças"
+    self.free_position = assert(Position.from_fen("startpos"))
+    self.free_selected, self.free_tool = nil, "move"
+    self:_notify("free_board", { position = self.free_position })
+    return true
+end
+
+function Controller:enter_free_board()
+    if self.bridge then
+        self:_send({ type = "disconnect" })
+        self.bridge:close()
+        self.bridge = nil
+    end
+    return self:start_free_board()
+end
+
+function Controller:free_select_tool(tool)
+    if self.view ~= "free_board" then return nil, "not_free_board" end
+    if tool ~= "move" and tool ~= "erase" and not tostring(tool):match("^[wb][pnbrqk]$") then
+        return nil, "bad_editor_tool"
+    end
+    self.free_tool, self.free_selected = tool, nil
+    self.status_text = tool == "move" and "Mover peças"
+        or (tool == "erase" and "Apagar peças" or "Adicionar " .. tool)
+    self:_notify("free_tool", { tool = tool })
+    return true
+end
+
+function Controller:free_tap_square(square)
+    if self.view ~= "free_board" or not self.free_position then return nil, "not_free_board" end
+    local dirty, err
+    if self.free_tool == "move" then
+        if not self.free_selected then
+            if not self.free_position:piece_at(square) then return true end
+            self.free_selected = square
+            self:_notify("free_selected", { square = square })
+            return true
+        end
+        local from = self.free_selected
+        self.free_selected = nil
+        if from == square then
+            self:_notify("free_selected", {})
+            return true
+        end
+        dirty, err = self.free_position:move_piece_unchecked(from, square)
+    elseif self.free_tool == "erase" then
+        dirty, err = self.free_position:set_piece(square, nil, nil)
+    else
+        dirty, err = self.free_position:set_piece(square,
+            self.free_tool:sub(1, 1), self.free_tool:sub(2, 2))
+    end
+    if not dirty then return nil, err end
+    self:_notify("free_position", { position = self.free_position, dirty = dirty })
+    return true
+end
+
+function Controller:free_clear()
+    local dirty = self.free_position:clear_board()
+    self.free_selected = nil
+    self:_notify("free_position", { position = self.free_position, dirty = dirty })
+end
+
+function Controller:free_reset()
+    self.free_position = assert(Position.from_fen("startpos"))
+    self.free_selected = nil
+    self:_notify("free_board", { position = self.free_position })
+end
+
+function Controller:free_toggle_turn()
+    self.free_position:set_turn(self.free_position.turn == "w" and "b" or "w")
+    self.status_text = self.free_position.turn == "w" and "Brancas jogam" or "Pretas jogam"
+    self:_notify("free_position", { position = self.free_position, dirty = {} })
+end
+
+function Controller:free_import_fen(fen)
+    local position, err = Position.from_fen(fen)
+    if not position then return nil, err end
+    self.free_position, self.free_selected = position, nil
+    self.status_text = "FEN carregada"
+    self:_notify("free_board", { position = position })
+    return true
+end
+
+function Controller:free_fen()
+    return self.free_position and self.free_position:to_fen() or nil
 end
 
 function Controller:_apply_full(payload)
@@ -281,6 +526,11 @@ function Controller:_apply_full(payload)
     else
         game_state = GameState.new(Clock.new(self.monotonic_now))
     end
+    if not self.game or self.game.id ~= payload.id then
+        self.chat_messages = {}
+        self.chat_unread = 0
+        self.chat_pending, self.chat_request_id = false, nil
+    end
     local update, err = game_state:apply_game_full(payload)
     if not update then return nil, err end
 
@@ -292,6 +542,12 @@ function Controller:_apply_full(payload)
     self.awaiting_reconnect_snapshot = false
     self.last_move = last_move(payload.state.moves)
     self.promotion = nil
+    if self.review_index ~= nil then
+        self.review_index = math.min(self.review_index, #self.game_state.moves)
+        self.review_position = assert(self:_position_at(self.review_index))
+    else
+        self.review_position = nil
+    end
     self.view = "game"
     self.connection = "connected"
     self.status_text = update.position.turn == player_color and "Sua vez" or "Vez do adversário"
@@ -306,6 +562,10 @@ function Controller:_apply_state(payload)
     self.selection:set_pending(update.pending_move ~= nil)
     self.promotion = nil
     self.last_move = last_move(payload.moves)
+    if self.review_index ~= nil then
+        self.review_index = math.min(self.review_index, #self.game_state.moves)
+        self.review_position = assert(self:_position_at(self.review_index))
+    end
     self.status_text = update.status == "started"
         and (update.position.turn == self.game.player_color and "Sua vez" or "Vez do adversário")
         or "Partida encerrada"
@@ -354,6 +614,9 @@ function Controller:handle(message)
         self.challenge = nil
         self.seeking = false
         self.challenging = false
+        self.review_index, self.review_position = nil, nil
+        self.chat_messages, self.chat_unread = {}, 0
+        self.chat_pending, self.chat_request_id = false, nil
         self.game = message.game
         self.view = "opening_game"
         self.status_text = "Abrindo partida…"
@@ -375,6 +638,19 @@ function Controller:handle(message)
             return nil, err
         end
         self:_notify("game_state", update)
+    elseif kind == "chat_line" then
+        self.chat_messages[#self.chat_messages + 1] = {
+            username = message.username, text = message.text,
+        }
+        if #self.chat_messages > 40 then table.remove(self.chat_messages, 1) end
+        local own = self.account and self.account.username
+            and self.account.username:lower() == message.username:lower()
+        if own then self.chat_pending, self.chat_request_id = false, nil end
+        if not own then self.chat_unread = math.min(99, self.chat_unread + 1) end
+        self:_notify("chat_line", {
+            message = self.chat_messages[#self.chat_messages], own = own,
+            unread = self.chat_unread,
+        })
     elseif kind == "move_rejected" then
         if self.game_state then self.game_state:reject_pending() end
         if self.selection then self.selection:set_pending(false) end
@@ -400,6 +676,10 @@ function Controller:handle(message)
         local summary, detail = result_summary(message.game)
         self.result_summary = summary
         self.result_detail = detail
+        if self.game_state then
+            self.review_index = #self.game_state.moves
+            self.review_position = assert(self:_position_at(self.review_index))
+        end
         if message.game.status == "draw" then
             self.status_text = "Empate"
         elseif message.game.status == "aborted" then
@@ -411,6 +691,9 @@ function Controller:handle(message)
         end
         self:_notify("game_finish", message)
     elseif kind == "error" then
+        if message.requestId and message.requestId == self.chat_request_id then
+            self.chat_pending, self.chat_request_id = false, nil
+        end
         self.status_text = error_status(message)
         if message.fatal or self.view == "connecting" then self.connection = "offline" end
         if not message.fatal and (self.seeking or self.challenging) then
@@ -422,7 +705,12 @@ function Controller:handle(message)
     elseif kind == "opponent_gone" then
         self.status_text = message.gone and "Adversário desconectado" or "Adversário reconectou"
         self:_notify("opponent_gone", message)
-    elseif kind == "command_ok" or kind == "pong" then
+    elseif kind == "command_ok" then
+        if message.command == "send_chat" and message.requestId == self.chat_request_id then
+            self.chat_pending, self.chat_request_id = false, nil
+        end
+        self:_notify(kind, message)
+    elseif kind == "pong" then
         self:_notify(kind, message)
     end
     return true

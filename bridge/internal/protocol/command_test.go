@@ -78,6 +78,9 @@ func TestValidateCommandFields(t *testing.T) {
 		{"challenge huge username", Command{Version: 1, Type: "create_challenge", RequestID: "r1", Username: strings.Repeat("x", 33)}, "invalid_username"},
 		{"challenge bad username", Command{Version: 1, Type: "create_challenge", RequestID: "r1", Username: "bad/user"}, "invalid_username"},
 		{"challenge no time", Command{Version: 1, Type: "create_challenge", RequestID: "r1", Username: "opponent"}, "invalid_time_control"},
+		{"chat wrong room", Command{Version: 1, Type: "send_chat", RequestID: "r1", GameID: "g1", Room: "spectator", Text: "oi"}, "invalid_chat_room"},
+		{"chat empty", Command{Version: 1, Type: "send_chat", RequestID: "r1", GameID: "g1", Room: "player", Text: "  "}, "invalid_chat_text"},
+		{"chat control", Command{Version: 1, Type: "send_chat", RequestID: "r1", GameID: "g1", Room: "player", Text: "oi\n"}, "invalid_chat_text"},
 		{"missing nonce", Command{Version: 1, Type: "ping"}, "invalid_nonce"},
 	}
 	for _, test := range tests {
@@ -108,6 +111,7 @@ func TestValidateCommandAcceptsEveryType(t *testing.T) {
 		{Version: 1, Type: "cancel_seek", RequestID: "r10"},
 		{Version: 1, Type: "create_challenge", RequestID: "r11", Username: "player-two", TimeControl: "600+5"},
 		{Version: 1, Type: "cancel_challenge", RequestID: "r12", ChallengeID: "c9"},
+		{Version: 1, Type: "send_chat", RequestID: "r13", GameID: "g1", Room: "player", Text: "Boa partida!"},
 		{Version: 1, Type: "ping", Nonce: "n1"},
 	}
 	for _, command := range commands {

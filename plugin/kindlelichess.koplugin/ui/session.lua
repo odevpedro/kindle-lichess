@@ -83,6 +83,7 @@ function Session:init()
     self.dimen = Screen:getSize()
     self.full_refresh_counter = 0
     self.pending_dialog = nil
+    self.chat_open = false
     self.clock_callback = function() self:_refresh_clocks() end
     self.controller.on_change = function(event, payload) self:_controller_changed(event, payload) end
     if Device:hasKeys() then self.key_events.Close = { { Device.input.group.Back } } end
@@ -130,9 +131,14 @@ function Session:_simple_content()
                 { text = _("Cancelar busca"), callback = function() controller:cancel_seek() end },
             }})
         else
+            local label = controller:time_control_label()
             self.lobby_actions = self:_button_table({{
-                { text = _("Jogar com alguém (10+5)"), callback = function() controller:seek_game() end },
+                { text = _("Jogar com alguém (") .. label .. ")",
+                    callback = function() self:_start_seek() end },
                 { text = _("Desafiar jogador…"), callback = function() self:_ask_username() end },
+            }, {
+                { text = _("Tempo: ") .. label, callback = function() self:_ask_time_control() end },
+                { text = _("Tabuleiro livre"), callback = function() controller:enter_free_board() end },
             }})
         end
         table.insert(group, self.lobby_actions)
@@ -185,6 +191,8 @@ end
 function Session:_build_game()
     local controller = self.controller
     local game = controller.game
+    local is_result = controller.view == "result"
+    local display_position = controller:display_position()
     local player_color = game.player_color
     local top_color = player_color == "w" and "b" or "w"
     local bottom_color = player_color
@@ -195,31 +203,53 @@ function Session:_build_game()
     self.top_clock = centered_text(self:_player_label(top_player, top_color), "cfont", 24)
     self.bottom_clock = centered_text(self:_player_label(bottom_player, bottom_color), "cfont", 24)
     self.top_captures = CapturedPieces:new{
-        position = controller.game_state.position, color = top_color, show_parent = self,
+        position = display_position, color = top_color, show_parent = self,
     }
     self.bottom_captures = CapturedPieces:new{
-        position = controller.game_state.position, color = bottom_color, show_parent = self,
+        position = display_position, color = bottom_color, show_parent = self,
     }
-    self.status_widget = centered_text(controller.status_text, "smallinfofont", 20)
+    local history_index, history_maximum = controller:history_index()
+    local status = controller.status_text
+    if is_result then
+        if not status:match("^PGN salvo") then
+            status = (controller.result_summary or status) .. " • " .. tostring(history_index)
+                .. "/" .. tostring(history_maximum)
+        end
+    elseif controller.review_index ~= nil then
+        status = "Revendo lance " .. tostring(history_index) .. "/" .. tostring(history_maximum)
+    end
+    self.status_widget = centered_text(status, "smallinfofont", 20)
 
     local reserved = title:getSize().h + self.top_clock:getSize().h + self.bottom_clock:getSize().h
         + self.top_captures:getSize().h + self.bottom_captures:getSize().h
-        + self.status_widget:getSize().h + Screen:scaleBySize(86)
+        + self.status_widget:getSize().h + Screen:scaleBySize(130)
     local board_size = math.min(Screen:getWidth() - Screen:scaleBySize(8), Screen:getHeight() - reserved)
     board_size = math.max(Screen:scaleBySize(320), board_size)
     self.board = Board:new{
-        position = controller.game_state.position,
+        position = display_position,
         orientation = player_color,
         board_size = board_size,
-        selected = controller.selection.selected,
-        last_move = controller.last_move,
-        destinations = controller.selection:available_destinations(),
+        selected = controller.review_index == nil and controller.selection.selected or nil,
+        last_move = controller:display_last_move(),
+        destinations = controller.review_index == nil and controller.selection:available_destinations() or {},
         on_tap = function(square) controller:tap_square(square) end,
     }
 
     local actions
     local promotion = controller.promotion
-    if promotion then
+    local history_row = {
+        { text = "<", callback = function() controller:history_back() end },
+        { text = ">", callback = function() controller:history_forward() end },
+    }
+    if is_result then
+        actions = self:_button_table({ history_row, {
+            { text = _("Salvar PGN"), callback = function()
+                local _, err = controller:save_pgn_file()
+                if err then self:_action_error(err) end
+            end },
+            { text = _("Close"), callback = function() self:onClose() end },
+        } })
+    elseif promotion then
         actions = self:_button_table({{
             { text = _("Queen"), callback = function() controller:promote(promotion.from, promotion.to, "q") end },
             { text = _("Rook"), callback = function() controller:promote(promotion.from, promotion.to, "r") end },
@@ -232,6 +262,7 @@ function Session:_build_game()
         local moves_played = #controller.game_state.moves
         local finish_text = moves_played < 2 and _("Abort") or _("Resign")
         local action_row = {
+            { text = controller:chat_label(), callback = function() self:_open_chat() end },
             { text = _("Draw"), callback = function() controller:offer_draw() end },
         }
         if controller.bridge and controller.bridge.simulate_disconnect then
@@ -242,15 +273,85 @@ function Session:_build_game()
         action_row[#action_row + 1] = {
             text = finish_text, callback = function() self:_confirm_finish(moves_played < 2) end,
         }
-        actions = self:_button_table({ action_row })
+        actions = self:_button_table({ history_row, action_row })
         self.promotion_actions = nil
     end
 
-    self:_schedule_clock()
+    if not is_result then self:_schedule_clock() end
     return VerticalGroup:new{
         align = "center", title, self.top_clock, self.top_captures, self.board,
         self.bottom_clock, self.bottom_captures, self.status_widget, actions,
     }
+end
+
+function Session:_build_chat()
+    local controller = self.controller
+    self.status_widget = centered_text(controller.status_text, "smallinfofont", 18)
+    self.chat_transcript = TextBoxWidget:new{
+        text = controller:chat_transcript(5),
+        width = math.floor(Screen:getWidth() * 0.88),
+        face = Font:getFace("cfont", 22),
+        alignment = "left",
+    }
+    self.chat_actions = self:_button_table({{
+        { text = _("Voltar ao tabuleiro"), callback = function() self:_close_chat() end },
+        { text = _("Escrever…"), callback = function() self:_ask_chat_message() end },
+    }})
+    return VerticalGroup:new{
+        align = "center", self:_title(),
+        VerticalSpan:new{ width = Screen:scaleBySize(18) },
+        centered_text(_("Chat da partida — somente jogadores"), "cfont", 24),
+        VerticalSpan:new{ width = Screen:scaleBySize(18) },
+        self.chat_transcript,
+        VerticalSpan:new{ width = Screen:scaleBySize(18) },
+        self.status_widget,
+        VerticalSpan:new{ width = Screen:scaleBySize(18) },
+        self.chat_actions,
+    }
+end
+
+function Session:_build_free_board()
+    local controller = self.controller
+    local title = self:_title()
+    self.status_widget = centered_text(controller.status_text, "smallinfofont", 20)
+    local reserved = title:getSize().h + self.status_widget:getSize().h + Screen:scaleBySize(220)
+    local board_size = math.min(Screen:getWidth() - Screen:scaleBySize(8),
+        Screen:getHeight() - reserved)
+    board_size = math.max(Screen:scaleBySize(280), board_size)
+    self.board = Board:new{
+        position = controller.free_position, orientation = "w", board_size = board_size,
+        selected = controller.free_selected, destinations = {},
+        on_tap = function(square) controller:free_tap_square(square) end,
+    }
+    self.free_actions = self:_button_table({
+        {
+            { text = _("Mover"), callback = function() controller:free_select_tool("move") end },
+            { text = _("Apagar"), callback = function() controller:free_select_tool("erase") end },
+            { text = _("Limpar"), callback = function() controller:free_clear() end },
+            { text = _("Inicial"), callback = function() controller:free_reset() end },
+        },
+        {
+            { text = "WP", callback = function() controller:free_select_tool("wp") end },
+            { text = "WN", callback = function() controller:free_select_tool("wn") end },
+            { text = "WB", callback = function() controller:free_select_tool("wb") end },
+            { text = "WR", callback = function() controller:free_select_tool("wr") end },
+            { text = "WQ", callback = function() controller:free_select_tool("wq") end },
+            { text = "WK", callback = function() controller:free_select_tool("wk") end },
+        },
+        {
+            { text = "BP", callback = function() controller:free_select_tool("bp") end },
+            { text = "BN", callback = function() controller:free_select_tool("bn") end },
+            { text = "BB", callback = function() controller:free_select_tool("bb") end },
+            { text = "BR", callback = function() controller:free_select_tool("br") end },
+            { text = "BQ", callback = function() controller:free_select_tool("bq") end },
+            { text = "BK", callback = function() controller:free_select_tool("bk") end },
+        },
+        {
+            { text = _("Alternar turno"), callback = function() controller:free_toggle_turn() end },
+            { text = _("Editar FEN…"), callback = function() self:_ask_fen() end },
+        },
+    })
+    return VerticalGroup:new{ align = "center", title, self.board, self.status_widget, self.free_actions }
 end
 
 function Session:_root(content)
@@ -268,8 +369,20 @@ function Session:_rebuild()
     self.challenge_actions = nil
     self.lobby_actions = nil
     self.promotion_actions = nil
-    local content = self.controller.view == "game" and self.controller.game_state
-        and self:_build_game() or self:_simple_content()
+    self.free_actions = nil
+    self.chat_actions = nil
+    self.chat_transcript = nil
+    local content
+    if self.chat_open and self.controller.game_state then
+        content = self:_build_chat()
+    elseif (self.controller.view == "game" or self.controller.view == "result")
+            and self.controller.game_state then
+        content = self:_build_game()
+    elseif self.controller.view == "free_board" and self.controller.free_position then
+        content = self:_build_free_board()
+    else
+        content = self:_simple_content()
+    end
     self[1] = self:_root(content)
     UIManager:setDirty(self, "ui")
 end
@@ -316,6 +429,28 @@ function Session:_promotion(payload)
     UIManager:nextTick(function() self:_rebuild() end)
 end
 
+function Session:_action_error(err)
+    local messages = {
+        invalid_time_control = _("Use o formato minutos+incremento, por exemplo 10+5"),
+        initial_time_too_large = _("Tempo inicial acima do permitido pelo Lichess"),
+        invalid_initial_time = _("Tempo inicial não aceito pelo Lichess"),
+        increment_too_large = _("Incremento acima do permitido pelo Lichess"),
+        board_api_too_fast = _("Este tempo é rápido demais para este modo da Board API"),
+        fractional_seconds = _("O tempo precisa resultar em segundos inteiros"),
+        invalid_chat_text = _("A mensagem deve ter de 1 a 280 bytes, sem quebras de linha"),
+        invalid_chat_room = _("Sala de chat inválida"),
+        chat_unavailable = _("Chat indisponível nesta tela"),
+        chat_pending = _("Aguarde o envio da mensagem anterior"),
+    }
+    self.controller.status_text = messages[err] or (_("Falha: ") .. tostring(err))
+    UIManager:nextTick(function() self:_rebuild() end)
+end
+
+function Session:_start_seek()
+    local ok, err = self.controller:seek_game()
+    if not ok then self:_action_error(err) end
+end
+
 function Session:_ask_username()
     local dialog = InputDialog:new{
         title = _("Opponent username"),
@@ -328,8 +463,86 @@ function Session:_ask_username()
                 local username = dialog:getInputText()
                 self:_dismiss_dialog()
                 if username and username ~= "" then
-                    self.controller:create_challenge(username)
+                    local ok, err = self.controller:create_challenge(username)
+                    if not ok then self:_action_error(err) end
                 end
+            end },
+        }},
+    }
+    self.pending_dialog = dialog
+    UIManager:show(dialog)
+end
+
+function Session:_ask_time_control()
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Tempo personalizado"),
+        info_text = _("Formato minutos+incremento, por exemplo 10+5. Seek público aceita Rapid ou mais lento."),
+        input = self.controller:time_control_label(),
+        allow_early_enter = true,
+        buttons = {{
+            { text = _("Cancel"), callback = function() self:_dismiss_dialog() end },
+            { text = _("Aplicar"), callback = function()
+                local value = dialog:getInputText()
+                self:_dismiss_dialog()
+                local ok, err = self.controller:set_time_control(value)
+                if not ok then self:_action_error(err) end
+            end },
+        }},
+    }
+    self.pending_dialog = dialog
+    UIManager:show(dialog)
+end
+
+function Session:_ask_fen()
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Posição FEN"),
+        info_text = _("Edite os seis campos FEN e toque em Aplicar."),
+        input = self.controller:free_fen() or "",
+        allow_early_enter = true,
+        buttons = {{
+            { text = _("Cancel"), callback = function() self:_dismiss_dialog() end },
+            { text = _("Aplicar"), callback = function()
+                local value = dialog:getInputText()
+                self:_dismiss_dialog()
+                local ok, err = self.controller:free_import_fen(value)
+                if not ok then self:_action_error(err) end
+            end },
+        }},
+    }
+    self.pending_dialog = dialog
+    UIManager:show(dialog)
+end
+
+function Session:_open_chat()
+    self.chat_open = true
+    self.controller:mark_chat_read(true)
+    UIManager:nextTick(function() self:_rebuild() end)
+end
+
+function Session:_close_chat()
+    self.chat_open = false
+    UIManager:nextTick(function() self:_rebuild() end)
+end
+
+function Session:_ask_chat_message()
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Mensagem ao adversário"),
+        info_text = _("Chat privado da partida. Seja gentil e siga as regras do Lichess."),
+        input = "",
+        allow_early_enter = true,
+        buttons = {{
+            { text = _("Cancel"), callback = function()
+                self:_dismiss_dialog()
+                UIManager:nextTick(function() self:_rebuild() end)
+            end },
+            { text = _("Enviar"), callback = function()
+                local value = dialog:getInputText()
+                self:_dismiss_dialog()
+                local ok, err = self.controller:send_chat(value)
+                if not ok then self:_action_error(err) end
             end },
         }},
     }
@@ -360,7 +573,25 @@ end
 
 function Session:_controller_changed(event, payload)
     if self.closing then return end
-    if event == "status" then
+    if event == "history" or event == "free_board" or event == "free_position"
+            or event == "free_selected" or event == "free_tool"
+            or event == "time_control" or event == "pgn_saved" then
+        self:_dismiss_dialog()
+        UIManager:nextTick(function() self:_rebuild() end)
+    elseif event == "chat_line" then
+        if self.chat_open then self.controller:mark_chat_read(true) end
+        if not self.pending_dialog then UIManager:nextTick(function() self:_rebuild() end) end
+    elseif event == "chat_read" then
+        UIManager:nextTick(function() self:_rebuild() end)
+    elseif event == "chat_sending" then
+        if self.chat_open then UIManager:nextTick(function() self:_rebuild() end) end
+    elseif event == "game_state" and self.chat_open then
+        if not self.pending_dialog then UIManager:nextTick(function() self:_rebuild() end) end
+    elseif event == "game_finish" then
+        self.chat_open = false
+        self:_dismiss_dialog()
+        UIManager:nextTick(function() self:_rebuild() end)
+    elseif event == "status" then
         -- Do not free and rebuild the button tree from inside its own tap callback.
         if self.controller.view == "lobby" then
             UIManager:nextTick(function() self:_rebuild() end)
@@ -383,6 +614,10 @@ function Session:_controller_changed(event, payload)
         self:_promotion()
     elseif event == "game_state" and self.board then
         self:_dismiss_dialog()
+        if self.controller.review_index ~= nil then
+            self:_rebuild()
+            return
+        end
         self.board:update(payload.position, payload.dirty,
             self.controller.selection.selected, self.controller.last_move,
             self.controller.selection:available_destinations())
@@ -406,6 +641,10 @@ function Session:onShow()
 end
 
 function Session:onClose()
+    if self.chat_open then
+        self:_close_chat()
+        return true
+    end
     UIManager:close(self, "flashui")
     return true
 end

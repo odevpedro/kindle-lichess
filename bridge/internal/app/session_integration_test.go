@@ -151,6 +151,15 @@ func (f *fakeLichess) handle(writer http.ResponseWriter, request *http.Request) 
 		f.gameEvents <- `{"type":"gameState","moves":"e2e4 e7e5","wtime":599000,"btime":598800,"winc":5000,"binc":5000,"status":"started"}`
 	case "/api/board/game/g1/move/a1a8":
 		writer.WriteHeader(http.StatusBadRequest)
+	case "/api/board/game/g1/chat":
+		_ = request.ParseForm()
+		if request.Form.Get("room") != "player" || request.Form.Get("text") != "Boa partida!" {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
+		f.gameEvents <- `{"type":"chatLine","room":"player","username":"Opponent","text":"Boa partida!"}`
+		f.gameEvents <- `{"type":"chatLine","room":"spectator","username":"Watcher","text":"ignored"}`
 	case "/api/board/game/g1/draw/yes":
 		writer.WriteHeader(http.StatusOK)
 		f.gameEvents <- `{"type":"gameState","moves":"e2e4 e7e5","wtime":599000,"btime":598800,"winc":5000,"binc":5000,"status":"draw"}`
@@ -358,6 +367,18 @@ func TestEndToEndUnixBridgeAgainstFakeLichess(t *testing.T) {
 	if rejected["reason"] != "lichess_rejected" {
 		t.Fatalf("rejection = %#v", rejected)
 	}
+	plugin.send(t, map[string]any{
+		"v": 1, "type": "send_chat", "requestId": "r-chat", "gameId": "g1",
+		"room": "player", "text": "Boa partida!",
+	})
+	chatResult := plugin.until(t, "command_ok", "chat_line")
+	line := chatResult["chat_line"]
+	if line["room"] != "player" || line["username"] != "Opponent" || line["text"] != "Boa partida!" {
+		t.Fatalf("chat line = %#v", line)
+	}
+	if fake.count("/api/board/game/g1/chat") != 1 {
+		t.Fatalf("chat HTTP count = %d", fake.count("/api/board/game/g1/chat"))
+	}
 
 	plugin.send(t, map[string]any{
 		"v": 1, "type": "offer_draw", "requestId": "r3", "gameId": "g1",
@@ -469,8 +490,8 @@ func TestSeekRoundTrip(t *testing.T) {
 		t.Fatalf("seek command_ok = %#v", ok)
 	}
 	values := fake.lastSeek()
-	if values.Get("timeControl") != "600+5" || values.Get("rated") != "false" ||
-		values.Get("variant") != "standard" || values.Get("keepAliveStream") != "true" {
+	if values.Get("time") != "10" || values.Get("increment") != "5" ||
+		values.Get("rated") != "false" || values.Get("variant") != "standard" {
 		t.Fatalf("seek form = %#v", values)
 	}
 	plugin.send(t, map[string]any{"v": 1, "type": "cancel_seek", "requestId": "s2"})

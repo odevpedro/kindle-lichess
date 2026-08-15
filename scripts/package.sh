@@ -37,7 +37,7 @@ mkdir -p "${package_root}/bin"
 install -m 0644 "${plugin_source}/_meta.lua" "${package_root}/_meta.lua"
 install -m 0644 "${plugin_source}/main.lua" "${package_root}/main.lua"
 install -m 0644 "${plugin_source}/controller.lua" "${package_root}/controller.lua"
-for directory in bridge chess icons ui; do
+for directory in bridge chess icons storage ui; do
     cp -a "${plugin_source}/${directory}" "${package_root}/${directory}"
 done
 install -m 0755 "${binary}" "${package_root}/bin/kindle-lichess-bridge"

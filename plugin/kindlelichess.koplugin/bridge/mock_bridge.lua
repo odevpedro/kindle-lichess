@@ -47,6 +47,7 @@ function MockBridge.new(options)
         scenario = "standard",
         wtime = 600000,
         btime = 600000,
+        increment = 5,
         status = "started",
     }, MockBridge)
 end
@@ -75,7 +76,7 @@ end
 function MockBridge:_state(extra)
     local state = {
         moves = self:_moves_string(), wtime = self.wtime, btime = self.btime,
-        winc = 5000, binc = 5000, status = self.status,
+        winc = self.increment * 1000, binc = self.increment * 1000, status = self.status,
     }
     for key, value in pairs(extra or {}) do state[key] = value end
     return state
@@ -113,6 +114,15 @@ function MockBridge:_finish(status, winner)
         state = self:_state({ winner = winner }) }, 0.1)
     self:_emit({ v = 1, type = "game_finish",
         game = { id = GAME_ID, status = status, winner = winner } }, 0.2)
+end
+
+function MockBridge:_set_time_control(value)
+    local limit, increment = tostring(value or ""):match("^(%d+)%+(%d+)$")
+    limit, increment = tonumber(limit), tonumber(increment)
+    if limit and increment then
+        self.wtime, self.btime = limit * 1000, limit * 1000
+        self.increment = increment
+    end
 end
 
 function MockBridge:send(message)
@@ -157,7 +167,7 @@ function MockBridge:send(message)
         end
         self:_command_ok(message)
         self.moves[#self.moves + 1] = message.move
-        self.wtime = math.max(0, self.wtime - 1000 + 5000)
+        self.wtime = math.max(0, self.wtime - 1000 + self.increment * 1000)
         self:_emit({ v = 1, type = "game_state", gameId = GAME_ID, state = self:_state() }, 0.1)
         if self.scenario == "standard" then
             local reply_position = assert(Position.reconstruct(self.initial_fen, self.moves))
@@ -172,7 +182,7 @@ function MockBridge:send(message)
                     local current = assert(Position.reconstruct(self.initial_fen, self.moves))
                     assert(current:apply_uci(reply))
                     self.moves[#self.moves + 1] = reply
-                    self.btime = math.max(0, self.btime - 1200 + 5000)
+                    self.btime = math.max(0, self.btime - 1200 + self.increment * 1000)
                     self:_emit({ v = 1, type = "game_state", gameId = GAME_ID,
                         state = self:_state() })
                 end)
@@ -185,6 +195,10 @@ function MockBridge:send(message)
         elseif self.scenario == "promotion" then
             self:_finish("mate", "w")
         end
+    elseif message.type == "send_chat" then
+        self:_command_ok(message)
+        self:_emit({ v = 1, type = "chat_line", gameId = GAME_ID,
+            room = "player", username = "KindleTester", text = message.text }, 0.05)
     elseif message.type == "offer_draw" or message.type == "accept_draw" then
         self:_command_ok(message)
         self:_finish("draw")
@@ -197,11 +211,13 @@ function MockBridge:send(message)
         self:_command_ok(message)
         self:_finish("aborted")
     elseif message.type == "seek" then
+        self:_set_time_control(message.timeControl)
         self:_command_ok(message)
         self:_emit({ v = 1, type = "game_start", game = { id = GAME_ID } }, 0.05)
     elseif message.type == "cancel_seek" then
         self:_command_ok(message)
     elseif message.type == "create_challenge" then
+        self:_set_time_control(message.timeControl)
         self:_command_ok(message)
         self:_emit({ v = 1, type = "game_start", game = { id = GAME_ID } }, 0.05)
     elseif message.type == "cancel_challenge" then
@@ -228,6 +244,13 @@ function MockBridge:simulate_disconnect()
     } }, 1.1)
 end
 
+
+function MockBridge:simulate_chat(text)
+    if not self.alive then return nil, "mock_closed" end
+    self:_emit({ v = 1, type = "chat_line", gameId = GAME_ID,
+        room = "player", username = "MockOpponent", text = text or "Boa partida!" })
+    return true
+end
 
 function MockBridge:simulate_result(result)
     if result == "victory" then
