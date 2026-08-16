@@ -16,7 +16,14 @@ válido e limitado a 2 MiB. Sem caminho explícito, o bridge usa o trust store d
 DNS e kernel do firmware continuam gates. Timeouts por fase, detecção de inatividade,
 bodies limitados e Retry-After/backoff/jitter. Base alternativa só em testes.
 
-Logs por allowlist. Teste injeta token-canário e falha se aparecer em stdout/stderr/IPC. Diagnóstico pseudonimiza conta/jogo.
+Logs por allowlist. Eventos rejeitados registram somente tipo de evento e código de erro
+reconhecidos; JSON bruto, texto bruto do erro, usuário, ID de partida, posição e chat não
+entram no stderr. Testes injetam canários em payload/erro e falham se aparecerem na saída.
+
+O diagnóstico exportável também usa allowlist fechada: versão do formato, rótulo da
+versão, idioma, modo do bridge e último código interno reconhecido. Ele não lê nem
+pseudonimiza conta/jogo: esses dados simplesmente não entram no arquivo. Consulte
+[privacy.md](privacy.md) e [privacy.pt-BR.md](privacy.pt-BR.md).
 
 ## Fair play
 

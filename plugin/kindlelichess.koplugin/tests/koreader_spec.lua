@@ -9,6 +9,7 @@ describe("Kindle Lichess KOReader integration", function()
         require("commonrequire")
         original_path = package.path
         package.path = plugin_path .. "/?.lua;" .. package.path
+        require("i18n").set_language("en")
     end)
 
     teardown(function()
@@ -36,12 +37,16 @@ describe("Kindle Lichess KOReader integration", function()
         plugin:addToMainMenu(menu_items)
         assert.equals("Kindle Lichess", menu_items.kindlelichess.text)
         assert.equals("more_tools", menu_items.kindlelichess.sorting_hint)
-        assert.equals(4, #menu_items.kindlelichess.sub_item_table)
+        assert.equals(6, #menu_items.kindlelichess.sub_item_table)
         assert.equals("Open Kindle Lichess", menu_items.kindlelichess.sub_item_table[1].text)
         assert.is_function(menu_items.kindlelichess.sub_item_table[1].callback)
         assert.equals("Free board", menu_items.kindlelichess.sub_item_table[2].text)
         assert.is_function(menu_items.kindlelichess.sub_item_table[2].callback)
         assert.is_true(menu_items.kindlelichess.sub_item_table[3].checked_func())
+        assert.equals("Language", menu_items.kindlelichess.sub_item_table[5].text)
+        assert.equals(3, #menu_items.kindlelichess.sub_item_table[5].sub_item_table)
+        assert.equals("Export sanitized diagnostics",
+            menu_items.kindlelichess.sub_item_table[6].text)
     end)
 
     it("builds live mode from paths without reading authentication material in Lua", function()
@@ -110,7 +115,7 @@ describe("Kindle Lichess KOReader integration", function()
         controller.closed = false
         controller.view = "challenge"
         controller.connection = "connected"
-        controller.status_text = "Desafio recebido"
+        controller.status_text = "Challenge received"
         controller.challenge = { id = "challenge01", challenger = { username = "Opponent" } }
         local session = Session:new{ controller = controller }
         local original_root = session[1]
@@ -119,9 +124,50 @@ describe("Kindle Lichess KOReader integration", function()
         accept.callback()
 
         assert.equals(original_root, session[1])
-        assert.equals("Aceitando desafio…", session.status_widget.text)
+        assert.equals("Accepting challenge…", session.status_widget.text)
         assert.equals("accept_challenge", sent.type)
         assert.equals("challenge01", sent.challengeId)
+        session:free()
+    end)
+
+    it("shows the username dialog above the modal session and submits its value", function()
+        local Controller = require("controller")
+        local Session = require("ui/session")
+        local UIManager = require("ui/uimanager")
+        local sent
+        local controller = Controller.new{ monotonic_now = function() return 10 end }
+        controller:attach_bridge({
+            send = function(_, message)
+                sent = message
+                return true
+            end,
+            close = function() end,
+        })
+        controller.closed = false
+        controller.view = "lobby"
+        controller.connection = "connected"
+        controller.status_text = "Connected"
+        local session = Session:new{ controller = controller }
+        UIManager:show(session)
+
+        session:_ask_username()
+        local dialog = assert(session.pending_dialog)
+        assert.is_true(dialog.modal)
+        assert.is_true(UIManager:isWidgetShown(dialog))
+        local session_index, dialog_index
+        for index, window in ipairs(UIManager._window_stack) do
+            if window.widget == session then session_index = index end
+            if window.widget == dialog then dialog_index = index end
+        end
+        assert.is_true(dialog_index > session_index)
+
+        dialog:setInputText("OpponentUser")
+        dialog.button_table:getButtonById("challenge").callback()
+        assert.is_nil(session.pending_dialog)
+        assert.equals("create_challenge", sent.type)
+        assert.equals("OpponentUser", sent.username)
+
+        if UIManager:isWidgetShown(session) then UIManager:close(session) end
         session:free()
     end)
 
@@ -234,7 +280,7 @@ describe("Kindle Lichess KOReader integration", function()
 
         controller:offer_draw()
         assert.equals("result", controller.view)
-        assert.equals("Empate", controller.status_text)
+        assert.equals("Drawn game", controller.status_text)
 
         session:onCloseWidget()
         assert.is_true(controller.closed)
@@ -279,10 +325,10 @@ describe("Kindle Lichess KOReader integration", function()
         local Session = require("ui/session")
         local Screen = require("device").screen
         local cases = {
-            { status = "mate", winner = "white", summary = "Vitória das Brancas" },
-            { status = "resign", winner = "black", summary = "Vitória das Pretas" },
-            { status = "draw", summary = "Empate" },
-            { status = "aborted", summary = "Partida abortada" },
+            { status = "mate", winner = "white", summary = "Victory for White" },
+            { status = "resign", winner = "black", summary = "Victory for Black" },
+            { status = "draw", summary = "Drawn game" },
+            { status = "aborted", summary = "Game aborted" },
         }
 
         for index, case in ipairs(cases) do
@@ -435,6 +481,7 @@ describe("Kindle Lichess KOReader integration", function()
             ca_file = "/koreader/data/ca-bundle.crt",
             socket_path = "/tmp/kindle-lichess.sock",
             util = fake_util,
+            file_exists = function() return true end,
             kill = function(pid, signal)
                 killed = { pid = pid, signal = signal }
                 return 0
@@ -448,6 +495,31 @@ describe("Kindle Lichess KOReader integration", function()
         table.remove(callbacks, 1)()
         table.remove(callbacks, 1)()
         assert.equals(2, done_checks)
+    end)
+
+    it("reports a missing token before starting the bridge process", function()
+        local Process = require("bridge/process")
+        local started = false
+        local process = Process.new{
+            binary = "/plugin/kindle-lichess-bridge",
+            token_file = "/tmp/missing-token",
+            ca_file = "/koreader/data/ca-bundle.crt",
+            socket_path = "/tmp/kindle-lichess.sock",
+            file_exists = function(path)
+                assert.equals("/tmp/missing-token", path)
+                return false
+            end,
+            util = {
+                runInSubProcess = function()
+                    started = true
+                    return 42
+                end,
+            },
+        }
+        local ok, err = process:start()
+        assert.is_nil(ok)
+        assert.equals("token_missing", err)
+        assert.is_false(started)
     end)
 
     it("exchanges bytes through a real nonblocking Unix socket", function()

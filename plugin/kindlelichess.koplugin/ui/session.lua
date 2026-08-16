@@ -14,6 +14,7 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
+local I18n = require("i18n")
 local Screen = Device.screen
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
@@ -22,7 +23,7 @@ local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local _ = require("gettext")
+local T = I18n.t
 
 local Session = InputContainer:extend{
     name = "kindle_lichess_session",
@@ -92,12 +93,12 @@ end
 
 function Session:_title()
     local connection = ({
-        connected = _("connected"), connecting = _("connecting"),
-        reconnecting = _("reconnecting"), offline = _("offline"),
+        connected = T("connected"), connecting = T("connecting"),
+        reconnecting = T("reconnecting"), offline = T("offline"),
     })[self.controller.connection] or self.controller.connection
     return TitleBar:new{
         width = Screen:getWidth(), fullscreen = true,
-        title = _("Kindle Lichess"), subtitle = connection,
+        title = T("Kindle Lichess"), subtitle = connection,
         with_bottom_line = true,
         close_callback = function() self:onClose() end,
         show_parent = self,
@@ -128,40 +129,42 @@ function Session:_simple_content()
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(28) })
         if controller.seeking then
             self.lobby_actions = self:_button_table({{
-                { text = _("Cancelar busca"), callback = function() controller:cancel_seek() end },
+                { text = T("Cancel search"), callback = function() controller:cancel_seek() end },
             }})
         else
             local label = controller:time_control_label()
             self.lobby_actions = self:_button_table({{
-                { text = _("Jogar com alguém (") .. label .. ")",
+                { text = T("Play someone (%{time})", { time = label }),
                     callback = function() self:_start_seek() end },
-                { text = _("Desafiar jogador…"), callback = function() self:_ask_username() end },
+                { text = T("Challenge player…"), callback = function() self:_ask_username() end },
             }, {
-                { text = _("Tempo: ") .. label, callback = function() self:_ask_time_control() end },
-                { text = _("Tabuleiro livre"), callback = function() controller:enter_free_board() end },
+                { text = T("Time: %{time}", { time = label }),
+                    callback = function() self:_ask_time_control() end },
+                { text = T("Free board"), callback = function() controller:enter_free_board() end },
             }})
         end
         table.insert(group, self.lobby_actions)
     elseif controller.view == "challenging" then
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(28) })
         self.lobby_actions = self:_button_table({{
-            { text = _("Cancelar desafio"), callback = function() controller:cancel_challenge() end },
+            { text = T("Cancel challenge"), callback = function() controller:cancel_challenge() end },
         }})
         table.insert(group, self.lobby_actions)
     elseif controller.view == "challenge" and controller.challenge then
         local challenger = controller.challenge.challenger or {}
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(24) })
         table.insert(group, TextBoxWidget:new{
-            text = string.format(_("%s challenges you\nRapid • 10+5 • Casual"),
-                challenger.username or _("Opponent")),
+            text = T("%{username} challenges you\nRapid • 10+5 • Casual", {
+                username = challenger.username or T("Opponent"),
+            }),
             width = math.floor(Screen:getWidth() * 0.82),
             face = Font:getFace("cfont", 24), alignment = "center",
         })
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(24) })
         self.challenge_actions = self:_button_table({{
-            { id = "decline", text = _("Decline"),
+            { id = "decline", text = T("Decline"),
                 callback = function() controller:decline_challenge() end },
-            { id = "accept", text = _("Accept"),
+            { id = "accept", text = T("Accept"),
                 callback = function() controller:accept_challenge() end },
         }})
         table.insert(group, self.challenge_actions)
@@ -175,7 +178,7 @@ function Session:_simple_content()
         end
         table.insert(group, VerticalSpan:new{ width = Screen:scaleBySize(32) })
         table.insert(group, self:_button_table({{
-            { text = _("Close"), callback = function() self:onClose() end },
+            { text = T("Close"), callback = function() self:onClose() end },
         }}))
     end
     return group
@@ -185,7 +188,7 @@ function Session:_player_label(player, color)
     player = player or {}
     local clock = self.controller.game_state.clock
     local remaining = clock:remaining(color)
-    return string.format("%s  %s", player.username or _("Player"), Clock.format(remaining))
+    return string.format("%s  %s", player.username or T("Player"), Clock.format(remaining))
 end
 
 function Session:_build_game()
@@ -211,12 +214,14 @@ function Session:_build_game()
     local history_index, history_maximum = controller:history_index()
     local status = controller.status_text
     if is_result then
-        if not status:match("^PGN salvo") then
+        if not controller.saved_pgn_path then
             status = (controller.result_summary or status) .. " • " .. tostring(history_index)
                 .. "/" .. tostring(history_maximum)
         end
     elseif controller.review_index ~= nil then
-        status = "Revendo lance " .. tostring(history_index) .. "/" .. tostring(history_maximum)
+        status = T("Reviewing move %{current}/%{total}", {
+            current = history_index, total = history_maximum,
+        })
     end
     self.status_widget = centered_text(status, "smallinfofont", 20)
 
@@ -243,31 +248,31 @@ function Session:_build_game()
     }
     if is_result then
         actions = self:_button_table({ history_row, {
-            { text = _("Salvar PGN"), callback = function()
+            { text = T("Save PGN"), callback = function()
                 local _, err = controller:save_pgn_file()
                 if err then self:_action_error(err) end
             end },
-            { text = _("Close"), callback = function() self:onClose() end },
+            { text = T("Close"), callback = function() self:onClose() end },
         } })
     elseif promotion then
         actions = self:_button_table({{
-            { text = _("Queen"), callback = function() controller:promote(promotion.from, promotion.to, "q") end },
-            { text = _("Rook"), callback = function() controller:promote(promotion.from, promotion.to, "r") end },
+            { text = T("Queen"), callback = function() controller:promote(promotion.from, promotion.to, "q") end },
+            { text = T("Rook"), callback = function() controller:promote(promotion.from, promotion.to, "r") end },
         }, {
-            { text = _("Bishop"), callback = function() controller:promote(promotion.from, promotion.to, "b") end },
-            { text = _("Knight"), callback = function() controller:promote(promotion.from, promotion.to, "n") end },
+            { text = T("Bishop"), callback = function() controller:promote(promotion.from, promotion.to, "b") end },
+            { text = T("Knight"), callback = function() controller:promote(promotion.from, promotion.to, "n") end },
         }})
         self.promotion_actions = actions
     else
         local moves_played = #controller.game_state.moves
-        local finish_text = moves_played < 2 and _("Abort") or _("Resign")
+        local finish_text = moves_played < 2 and T("Abort") or T("Resign")
         local action_row = {
             { text = controller:chat_label(), callback = function() self:_open_chat() end },
-            { text = _("Draw"), callback = function() controller:offer_draw() end },
+            { text = T("Draw"), callback = function() controller:offer_draw() end },
         }
         if controller.bridge and controller.bridge.simulate_disconnect then
             action_row[#action_row + 1] = {
-                text = _("Reconnect"), callback = function() controller:simulate_disconnect() end,
+                text = T("Reconnect"), callback = function() controller:simulate_disconnect() end,
             }
         end
         action_row[#action_row + 1] = {
@@ -294,13 +299,13 @@ function Session:_build_chat()
         alignment = "left",
     }
     self.chat_actions = self:_button_table({{
-        { text = _("Voltar ao tabuleiro"), callback = function() self:_close_chat() end },
-        { text = _("Escrever…"), callback = function() self:_ask_chat_message() end },
+        { text = T("Back to board"), callback = function() self:_close_chat() end },
+        { text = T("Write…"), callback = function() self:_ask_chat_message() end },
     }})
     return VerticalGroup:new{
         align = "center", self:_title(),
         VerticalSpan:new{ width = Screen:scaleBySize(18) },
-        centered_text(_("Chat da partida — somente jogadores"), "cfont", 24),
+        centered_text(T("Game chat — players only"), "cfont", 24),
         VerticalSpan:new{ width = Screen:scaleBySize(18) },
         self.chat_transcript,
         VerticalSpan:new{ width = Screen:scaleBySize(18) },
@@ -325,10 +330,10 @@ function Session:_build_free_board()
     }
     self.free_actions = self:_button_table({
         {
-            { text = _("Mover"), callback = function() controller:free_select_tool("move") end },
-            { text = _("Apagar"), callback = function() controller:free_select_tool("erase") end },
-            { text = _("Limpar"), callback = function() controller:free_clear() end },
-            { text = _("Inicial"), callback = function() controller:free_reset() end },
+            { text = T("Move"), callback = function() controller:free_select_tool("move") end },
+            { text = T("Erase"), callback = function() controller:free_select_tool("erase") end },
+            { text = T("Clear"), callback = function() controller:free_clear() end },
+            { text = T("Initial"), callback = function() controller:free_reset() end },
         },
         {
             { text = "WP", callback = function() controller:free_select_tool("wp") end },
@@ -347,8 +352,8 @@ function Session:_build_free_board()
             { text = "BK", callback = function() controller:free_select_tool("bk") end },
         },
         {
-            { text = _("Alternar turno"), callback = function() controller:free_toggle_turn() end },
-            { text = _("Editar FEN…"), callback = function() self:_ask_fen() end },
+            { text = T("Toggle turn"), callback = function() controller:free_toggle_turn() end },
+            { text = T("Edit FEN…"), callback = function() self:_ask_fen() end },
         },
     })
     return VerticalGroup:new{ align = "center", title, self.board, self.status_widget, self.free_actions }
@@ -431,18 +436,19 @@ end
 
 function Session:_action_error(err)
     local messages = {
-        invalid_time_control = _("Use o formato minutos+incremento, por exemplo 10+5"),
-        initial_time_too_large = _("Tempo inicial acima do permitido pelo Lichess"),
-        invalid_initial_time = _("Tempo inicial não aceito pelo Lichess"),
-        increment_too_large = _("Incremento acima do permitido pelo Lichess"),
-        board_api_too_fast = _("Este tempo é rápido demais para este modo da Board API"),
-        fractional_seconds = _("O tempo precisa resultar em segundos inteiros"),
-        invalid_chat_text = _("A mensagem deve ter de 1 a 280 bytes, sem quebras de linha"),
-        invalid_chat_room = _("Sala de chat inválida"),
-        chat_unavailable = _("Chat indisponível nesta tela"),
-        chat_pending = _("Aguarde o envio da mensagem anterior"),
+        invalid_time_control = T("Use minutes+increment, for example 10+5"),
+        initial_time_too_large = T("Initial time exceeds the Lichess limit"),
+        invalid_initial_time = T("Initial time is not accepted by Lichess"),
+        increment_too_large = T("Increment exceeds the Lichess limit"),
+        board_api_too_fast = T("This time control is too fast for this Board API mode"),
+        fractional_seconds = T("The time must result in whole seconds"),
+        invalid_chat_text = T("The message must contain 1 to 280 bytes and no line breaks"),
+        invalid_chat_room = T("Invalid chat room"),
+        chat_unavailable = T("Chat is unavailable on this screen"),
+        chat_pending = T("Wait for the previous message to be sent"),
     }
-    self.controller.status_text = messages[err] or (_("Falha: ") .. tostring(err))
+    self.controller:remember_error(err)
+    self.controller.status_text = messages[err] or self.controller:error_message(err)
     UIManager:nextTick(function() self:_rebuild() end)
 end
 
@@ -451,15 +457,23 @@ function Session:_start_seek()
     if not ok then self:_action_error(err) end
 end
 
+function Session:_show_input_dialog(dialog)
+    dialog.modal = true
+    self.pending_dialog = dialog
+    UIManager:show(dialog, "flashui")
+    dialog:onShowKeyboard()
+end
+
 function Session:_ask_username()
-    local dialog = InputDialog:new{
-        title = _("Opponent username"),
-        info_text = _("Lichess username, e.g. MagnusCarlsen"),
+    local dialog
+    dialog = InputDialog:new{
+        title = T("Opponent username"),
+        description = T("Lichess username, e.g. MagnusCarlsen"),
         input = "",
         allow_early_enter = true,
         buttons = {{
-            { text = _("Cancel"), callback = function() self:_dismiss_dialog() end },
-            { text = _("Challenge"), callback = function()
+            { id = "cancel", text = T("Cancel"), callback = function() self:_dismiss_dialog() end },
+            { id = "challenge", text = T("Challenge"), callback = function()
                 local username = dialog:getInputText()
                 self:_dismiss_dialog()
                 if username and username ~= "" then
@@ -469,20 +483,19 @@ function Session:_ask_username()
             end },
         }},
     }
-    self.pending_dialog = dialog
-    UIManager:show(dialog)
+    self:_show_input_dialog(dialog)
 end
 
 function Session:_ask_time_control()
     local dialog
     dialog = InputDialog:new{
-        title = _("Tempo personalizado"),
-        info_text = _("Formato minutos+incremento, por exemplo 10+5. Seek público aceita Rapid ou mais lento."),
+        title = T("Custom time"),
+        description = T("Format: minutes+increment, for example 10+5. Public search accepts Rapid or slower."),
         input = self.controller:time_control_label(),
         allow_early_enter = true,
         buttons = {{
-            { text = _("Cancel"), callback = function() self:_dismiss_dialog() end },
-            { text = _("Aplicar"), callback = function()
+            { text = T("Cancel"), callback = function() self:_dismiss_dialog() end },
+            { text = T("Apply"), callback = function()
                 local value = dialog:getInputText()
                 self:_dismiss_dialog()
                 local ok, err = self.controller:set_time_control(value)
@@ -490,20 +503,19 @@ function Session:_ask_time_control()
             end },
         }},
     }
-    self.pending_dialog = dialog
-    UIManager:show(dialog)
+    self:_show_input_dialog(dialog)
 end
 
 function Session:_ask_fen()
     local dialog
     dialog = InputDialog:new{
-        title = _("Posição FEN"),
-        info_text = _("Edite os seis campos FEN e toque em Aplicar."),
+        title = T("FEN position"),
+        description = T("Edit all six FEN fields and tap Apply."),
         input = self.controller:free_fen() or "",
         allow_early_enter = true,
         buttons = {{
-            { text = _("Cancel"), callback = function() self:_dismiss_dialog() end },
-            { text = _("Aplicar"), callback = function()
+            { text = T("Cancel"), callback = function() self:_dismiss_dialog() end },
+            { text = T("Apply"), callback = function()
                 local value = dialog:getInputText()
                 self:_dismiss_dialog()
                 local ok, err = self.controller:free_import_fen(value)
@@ -511,8 +523,7 @@ function Session:_ask_fen()
             end },
         }},
     }
-    self.pending_dialog = dialog
-    UIManager:show(dialog)
+    self:_show_input_dialog(dialog)
 end
 
 function Session:_open_chat()
@@ -529,16 +540,16 @@ end
 function Session:_ask_chat_message()
     local dialog
     dialog = InputDialog:new{
-        title = _("Mensagem ao adversário"),
-        info_text = _("Chat privado da partida. Seja gentil e siga as regras do Lichess."),
+        title = T("Message to opponent"),
+        description = T("Private game chat. Be kind and follow the Lichess rules."),
         input = "",
         allow_early_enter = true,
         buttons = {{
-            { text = _("Cancel"), callback = function()
+            { text = T("Cancel"), callback = function()
                 self:_dismiss_dialog()
                 UIManager:nextTick(function() self:_rebuild() end)
             end },
-            { text = _("Enviar"), callback = function()
+            { text = T("Send"), callback = function()
                 local value = dialog:getInputText()
                 self:_dismiss_dialog()
                 local ok, err = self.controller:send_chat(value)
@@ -546,15 +557,14 @@ function Session:_ask_chat_message()
             end },
         }},
     }
-    self.pending_dialog = dialog
-    UIManager:show(dialog)
+    self:_show_input_dialog(dialog)
 end
 
 function Session:_confirm_finish(abort)
     local dialog
     dialog = ConfirmBox:new{
-        text = abort and _("Abort this game?") or _("Resign this game?"),
-        ok_text = abort and _("Abort") or _("Resign"),
+        text = abort and T("Abort this game?") or T("Resign this game?"),
+        ok_text = abort and T("Abort") or T("Resign"),
         ok_callback = function()
             if abort then self.controller:abort() else self.controller:resign() end
         end,
@@ -567,6 +577,7 @@ function Session:_dismiss_dialog()
     local dialog = self.pending_dialog
     self.pending_dialog = nil
     if dialog and UIManager:isWidgetShown(dialog) then
+        dialog:onCloseKeyboard()
         UIManager:close(dialog, "flashui")
     end
 end

@@ -205,17 +205,33 @@ func (s *Session) handleAccountEvent(event lichess.RawEvent) error {
 	}
 }
 
-// logRejectedEvent writes the event that failed normalization to stderr so the
-// KOReader crash log can capture it for diagnosis. Stream payloads never
-// contain the API token. Output is bounded to avoid flooding.
+// logRejectedEvent emits only allowlisted metadata. Lichess stream payloads may
+// contain usernames, game IDs, positions and private chat, so raw JSON and raw
+// error text must never reach KOReader's crash log.
 func logRejectedEvent(event lichess.RawEvent, err error) {
-	payload := event.JSON
-	if len(payload) > 800 {
-		payload = payload[:800]
+	writeRejectedEvent(os.Stderr, event, err)
+}
+
+func writeRejectedEvent(destination io.Writer, event lichess.RawEvent, err error) {
+	eventType := "unknown"
+	switch event.Type {
+	case "challenge", "challengeCanceled", "challengeDeclined", "gameStart", "gameFinish",
+		"gameFull", "gameState", "chatLine", "opponentGone":
+		eventType = event.Type
 	}
-	_, _ = fmt.Fprintf(os.Stderr,
-		"kindle-lichess-bridge: normalize_reject type=%s err=%v raw=%s\n",
-		event.Type, err, payload)
+	code := "internal"
+	var apiError *lichess.APIError
+	if errors.As(err, &apiError) {
+		switch apiError.Code {
+		case "invalid_json", "invalid_response", "message_too_large":
+			code = apiError.Code
+		}
+	} else if errors.Is(err, stream.ErrMessageTooLarge) {
+		code = "message_too_large"
+	}
+	_, _ = fmt.Fprintf(destination,
+		"kindle-lichess-bridge: normalize_reject event=%s code=%s\n",
+		eventType, code)
 }
 
 func (s *Session) openSeek(ctx context.Context, options lichess.SeekOptions) error {

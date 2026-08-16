@@ -3,6 +3,7 @@
 
 local Clock = require("chess/clock")
 local GameState = require("chess/game_state")
+local I18n = require("i18n")
 local Pgn = require("chess/pgn")
 local Position = require("chess/position")
 local Protocol = require("bridge/protocol")
@@ -11,21 +12,49 @@ local Selection = require("chess/selection")
 
 local Controller = {}
 Controller.__index = Controller
+local T = I18n.t
 
 local error_messages = {
-    lichess_rejected = "Lichess recusou a ação; o desafio pode ter expirado",
-    auth_unauthorized = "Token recusado pelo Lichess",
-    auth_forbidden = "Token sem permissão board:play",
-    not_found = "Desafio ou partida não encontrado",
-    rate_limited = "Muitas solicitações; aguarde e tente novamente",
-    network_timeout = "Tempo de resposta do Lichess esgotado",
-    network_error = "Falha de rede ao acessar o Lichess",
-    not_connected = "Bridge ainda não conectado",
+    token_missing = "No Lichess token was found. Add the token and reopen the plugin",
+    token_permissions = "The token file permissions are unsafe. Set mode 0600 and try again",
+    token_invalid = "The token file is invalid. Create a new token with board:play access",
+    lichess_rejected = "Lichess rejected the action; the challenge may have expired",
+    auth_unauthorized = "Token rejected by Lichess",
+    auth_forbidden = "Token lacks the board:play permission",
+    not_found = "Challenge or game not found",
+    rate_limited = "Too many requests; wait and try again",
+    network_timeout = "Lichess response timed out",
+    network_error = "Network failure while accessing Lichess",
+    http_error = "Lichess is temporarily unavailable. Wait and try again",
+    not_connected = "Bridge is not connected yet",
+    process_start_failed = "The local bridge could not be started. Restart KOReader",
+    socket_unavailable = "The local bridge is unavailable. Restart KOReader and check the token",
+    socket_in_use = "Another bridge is already using the local socket. Restart KOReader",
+    unsafe_socket_path = "The local bridge socket is unsafe. Restart KOReader",
+    bridge_closed = "The local bridge stopped. Reopen the plugin",
+    socket_read_failed = "The local bridge connection failed while reading. Reopen the plugin",
+    socket_write_failed = "The local bridge connection failed while writing. Reopen the plugin",
+    ca_file_invalid = "KOReader's certificate file is invalid or unavailable",
+    invalid_json = "The bridge returned an invalid message. Reopen the plugin",
+    invalid_response = "Lichess returned an unsupported response",
+    message_too_large = "A bridge message exceeded the safe size limit",
+    internal = "The bridge encountered an internal error. Reopen the plugin",
 }
 
 local function error_status(message)
-    local text = error_messages[message.code] or message.message or "Falha no bridge"
-    return text .. " (" .. tostring(message.code or "unknown") .. ")"
+    local source = error_messages[message.code]
+    local text = source and T(source) or T("Unexpected bridge error")
+    return T("%{message} (%{code})", {
+        message = text, code = tostring(message.code or "unknown"),
+    })
+end
+
+function Controller:error_message(code)
+    return error_status({ code = code })
+end
+
+function Controller:remember_error(code)
+    self.record_error(tostring(code or "internal"))
 end
 
 local function last_move(moves)
@@ -45,15 +74,15 @@ local function supported_speed(speed)
 end
 
 local end_reasons = {
-    mate = "por cheque-mate",
-    checkmate = "por cheque-mate",
-    resign = "por desistência",
-    timeout = "por tempo esgotado",
-    outoftime = "por tempo esgotado",
-    flag = "por tempo esgotado",
-    illegalmove = "por lance ilegal",
-    illegal_move = "por lance ilegal",
-    stalemate = "por afogamento",
+    mate = "by checkmate",
+    checkmate = "by checkmate",
+    resign = "by resignation",
+    timeout = "on time",
+    outoftime = "on time",
+    flag = "on time",
+    illegalmove = "by illegal move",
+    illegal_move = "by illegal move",
+    stalemate = "by stalemate",
     draw = "",
     aborted = "",
 }
@@ -67,12 +96,14 @@ end
 local function result_summary(game)
     local winner = normalize_winner(game.winner)
     local status = tostring(game.status)
-    if status == "aborted" then return "Partida abortada", "" end
+    if status == "aborted" then return T("Game aborted"), "" end
     if winner then
-        local color = winner == "w" and "Brancas" or "Pretas"
-        return "Vitória das " .. color, end_reasons[status] or ""
+        local color = winner == "w" and T("White") or T("Black")
+        local reason = end_reasons[status]
+        return T("Victory for %{color}", { color = color }), reason and T(reason) or ""
     end
-    return "Empate", end_reasons[status] or ""
+    local reason = end_reasons[status]
+    return T("Drawn game"), reason and T(reason) or ""
 end
 
 function Controller.new(options)
@@ -82,11 +113,12 @@ function Controller.new(options)
     return setmetatable({
         monotonic_now = assert(options.monotonic_now, "monotonic clock is required"),
         on_change = options.on_change or function() end,
+        record_error = options.record_error or function() end,
         bridge = nil,
         request_sequence = 0,
         view = "closed",
         connection = "offline",
-        status_text = "Fechado",
+        status_text = T("Closed"),
         account = nil,
         challenge = nil,
         game = nil,
@@ -105,6 +137,7 @@ function Controller.new(options)
         save_time_control = options.save_time_control or function() end,
         pgn_writer = options.pgn_writer,
         pgn_directory = options.pgn_directory or "/mnt/us/documents/KindleLichess",
+        saved_pgn_path = nil,
         chat_messages = {},
         chat_unread = 0,
         chat_pending = false,
@@ -142,15 +175,25 @@ function Controller:start()
     self.closed = false
     self.view = "connecting"
     self.connection = "connecting"
-    self.status_text = "Conectando…"
+    self.status_text = T("Connecting…")
     self:_notify("view")
-    self.bridge:start()
+    local started, start_err = self.bridge:start()
+    if start_err ~= nil or started == false then
+        self.connection = "offline"
+        self:remember_error(start_err)
+        self.status_text = self:error_message(start_err)
+        self:_notify("error", { code = start_err })
+        return nil, start_err
+    end
     local ok, err = self:_send({ type = "connect" })
     if not ok then
         self.connection = "offline"
-        self.status_text = "Falha ao iniciar: " .. tostring(err)
+        self:remember_error(err)
+        self.status_text = self:error_message(err)
         self:_notify("error", { code = err })
+        return nil, err
     end
+    return true
 end
 
 function Controller:close()
@@ -163,13 +206,13 @@ function Controller:close()
     self.view = "closed"
     self.connection = "offline"
     self.promotion = nil
-    self.status_text = "Fechado"
+    self.status_text = T("Closed")
     self:_notify("closed")
 end
 
 function Controller:accept_challenge()
     if not self.challenge then return nil, "no_challenge" end
-    self.status_text = "Aceitando desafio…"
+    self.status_text = T("Accepting challenge…")
     self:_notify("status")
     return self:_send({
         type = "accept_challenge", requestId = self:_request_id(),
@@ -195,14 +238,14 @@ function Controller:tap_square(square)
         local marked, mark_err = self.game_state:mark_pending(action.uci)
         if not marked then return { type = "rejected", reason = mark_err } end
         self.selection:set_pending(true)
-        self.status_text = "Enviando " .. action.uci .. "…"
+        self.status_text = T("Sending %{move}…", { move = action.uci })
         local ok, err = self:_send({
             type = "move", requestId = self:_request_id(), gameId = self.game.id, move = action.uci,
         })
         if not ok then
             self.game_state:reject_pending()
             self.selection:set_pending(false)
-            self.status_text = "Jogada não enviada"
+            self.status_text = T("Move not sent")
             action = { type = "rejected", reason = err }
         end
     end
@@ -220,7 +263,7 @@ function Controller:promote(from, to, piece)
     local marked, mark_err = self.game_state:mark_pending(action.uci)
     if not marked then return nil, mark_err end
     self.selection:set_pending(true)
-    self.status_text = "Enviando promoção…"
+    self.status_text = T("Sending promotion…")
     local ok, err = self:_send({
         type = "move", requestId = self:_request_id(), gameId = self.game.id, move = action.uci,
     })
@@ -259,7 +302,7 @@ function Controller:set_time_control(value)
     self.time_control = control
     local wire = assert(TimeControl.to_wire(control))
     self.save_time_control(wire)
-    self.status_text = "Tempo definido: " .. TimeControl.display(control)
+    self.status_text = T("Time set: %{time}", { time = TimeControl.display(control) })
     self:_notify("time_control", { value = wire })
     return true
 end
@@ -270,7 +313,7 @@ function Controller:seek_game()
     if not valid then return nil, valid_err end
     local label = TimeControl.display(self.time_control)
     self.seeking = true
-    self.status_text = "Procurando adversário (" .. label .. " casual)…"
+    self.status_text = T("Searching for an opponent (%{time} casual)…", { time = label })
     self:_notify("status")
     return self:_send({ type = "seek", requestId = self:_request_id(), rated = false,
         timeControl = assert(TimeControl.to_wire(self.time_control)) })
@@ -279,7 +322,7 @@ end
 function Controller:cancel_seek()
     if not self.seeking then return true end
     self.seeking = false
-    self.status_text = "Busca cancelada"
+    self.status_text = T("Search canceled")
     self:_notify("status")
     return self:_send({ type = "cancel_seek", requestId = self:_request_id() })
 end
@@ -289,7 +332,7 @@ function Controller:create_challenge(username)
     local valid, valid_err = TimeControl.validate_challenge(self.time_control)
     if not valid then return nil, valid_err end
     self.challenging = true
-    self.status_text = "Desafiando " .. tostring(username) .. "…"
+    self.status_text = T("Challenging %{username}…", { username = username })
     self:_notify("status")
     return self:_send({
         type = "create_challenge", requestId = self:_request_id(),
@@ -301,7 +344,7 @@ end
 function Controller:cancel_challenge()
     if not (self.challenging and self.challenge) then return true end
     self.challenging = false
-    self.status_text = "Cancelando desafio…"
+    self.status_text = T("Canceling challenge…")
     self:_notify("status")
     return self:_send({
         type = "cancel_challenge", requestId = self:_request_id(),
@@ -371,13 +414,14 @@ function Controller:save_pgn_file()
     if not content then return nil, generate_err end
     local path, write_err = self.pgn_writer(self.pgn_directory, self.game, content)
     if not path then return nil, write_err end
-    self.status_text = "PGN salvo em " .. path
+    self.saved_pgn_path = path
+    self.status_text = T("PGN saved to %{path}", { path = path })
     self:_notify("pgn_saved", { path = path })
     return path
 end
 
 function Controller:chat_label()
-    return self.chat_unread > 0 and ("Chat (" .. tostring(self.chat_unread) .. ")") or "Chat"
+    return self.chat_unread > 0 and T("Chat (%{count})", { count = self.chat_unread }) or T("Chat")
 end
 
 function Controller:chat_transcript(limit)
@@ -388,7 +432,7 @@ function Controller:chat_transcript(limit)
         local message = self.chat_messages[index]
         lines[#lines + 1] = tostring(message.username) .. ": " .. tostring(message.text)
     end
-    return #lines > 0 and table.concat(lines, "\n\n") or "Nenhuma mensagem nesta partida."
+    return #lines > 0 and table.concat(lines, "\n\n") or T("No messages in this game.")
 end
 
 function Controller:mark_chat_read(silent)
@@ -427,7 +471,7 @@ end
 function Controller:start_free_board()
     self.closed = false
     self.view, self.connection = "free_board", "offline"
-    self.status_text = "Tabuleiro livre — mover peças"
+    self.status_text = T("Free board — move pieces")
     self.free_position = assert(Position.from_fen("startpos"))
     self.free_selected, self.free_tool = nil, "move"
     self:_notify("free_board", { position = self.free_position })
@@ -449,8 +493,8 @@ function Controller:free_select_tool(tool)
         return nil, "bad_editor_tool"
     end
     self.free_tool, self.free_selected = tool, nil
-    self.status_text = tool == "move" and "Mover peças"
-        or (tool == "erase" and "Apagar peças" or "Adicionar " .. tool)
+    self.status_text = tool == "move" and T("Move pieces")
+        or (tool == "erase" and T("Erase pieces") or T("Add %{piece}", { piece = tool }))
     self:_notify("free_tool", { tool = tool })
     return true
 end
@@ -497,7 +541,7 @@ end
 
 function Controller:free_toggle_turn()
     self.free_position:set_turn(self.free_position.turn == "w" and "b" or "w")
-    self.status_text = self.free_position.turn == "w" and "Brancas jogam" or "Pretas jogam"
+    self.status_text = self.free_position.turn == "w" and T("White to move") or T("Black to move")
     self:_notify("free_position", { position = self.free_position, dirty = {} })
 end
 
@@ -505,7 +549,7 @@ function Controller:free_import_fen(fen)
     local position, err = Position.from_fen(fen)
     if not position then return nil, err end
     self.free_position, self.free_selected = position, nil
-    self.status_text = "FEN carregada"
+    self.status_text = T("FEN loaded")
     self:_notify("free_board", { position = position })
     return true
 end
@@ -550,7 +594,7 @@ function Controller:_apply_full(payload)
     end
     self.view = "game"
     self.connection = "connected"
-    self.status_text = update.position.turn == player_color and "Sua vez" or "Vez do adversário"
+    self.status_text = update.position.turn == player_color and T("Your turn") or T("Opponent's turn")
     return update
 end
 
@@ -567,8 +611,8 @@ function Controller:_apply_state(payload)
         self.review_position = assert(self:_position_at(self.review_index))
     end
     self.status_text = update.status == "started"
-        and (update.position.turn == self.game.player_color and "Sua vez" or "Vez do adversário")
-        or "Partida encerrada"
+        and (update.position.turn == self.game.player_color and T("Your turn") or T("Opponent's turn"))
+        or T("Game finished")
     return update
 end
 
@@ -576,7 +620,8 @@ function Controller:handle(message)
     if self.closed then return nil, "controller_closed" end
     local valid, validation_err = Protocol.validate_server(message)
     if not valid then
-        self.status_text = "Mensagem inválida do bridge"
+        self:remember_error(validation_err)
+        self.status_text = T("Invalid bridge message")
         self:_notify("invalid_message", { reason = validation_err })
         return nil, validation_err
     end
@@ -586,7 +631,7 @@ function Controller:handle(message)
         self.account = message.account
         self.connection = "connected"
         if self.view ~= "game" then self.view = "lobby" end
-        self.status_text = "Conectado como " .. message.account.username
+        self.status_text = T("Connected as %{username}", { username = message.account.username })
         self:_notify("connected", message)
     elseif kind == "challenge" then
         local direction = message.challenge.direction
@@ -594,21 +639,22 @@ function Controller:handle(message)
             self.challenge = message.challenge
             self.challenging = true
             self.view = "challenging"
-            self.status_text = "Desafio enviado, aguardando aceite…"
+            self.status_text = T("Challenge sent, waiting for acceptance…")
             self:_notify("challenging", message)
         else
             if self.seeking then self.seeking = false end
             self.challenging = false
             self.challenge = message.challenge
             self.view = "challenge"
-            self.status_text = "Desafio recebido"
+            self.status_text = T("Challenge received")
             self:_notify("challenge", message)
         end
     elseif kind == "challenge_canceled" or kind == "challenge_declined" then
         self.challenge = nil
         self.challenging = false
         self.view = "lobby"
-        self.status_text = kind == "challenge_declined" and "Desafio recusado" or "Desafio cancelado"
+        self.status_text = kind == "challenge_declined" and T("Challenge declined")
+            or T("Challenge canceled")
         self:_notify(kind, message)
     elseif kind == "game_start" then
         self.challenge = nil
@@ -617,15 +663,16 @@ function Controller:handle(message)
         self.review_index, self.review_position = nil, nil
         self.chat_messages, self.chat_unread = {}, 0
         self.chat_pending, self.chat_request_id = false, nil
+        self.saved_pgn_path = nil
         self.game = message.game
         self.view = "opening_game"
-        self.status_text = "Abrindo partida…"
+        self.status_text = T("Opening game…")
         self:_notify("game_start", message)
         self:_send({ type = "open_game", gameId = message.game.id })
     elseif kind == "game_full" then
         local update, err = self:_apply_full(message.state)
         if not update then
-            self.status_text = "Partida incompatível: " .. tostring(err)
+            self.status_text = T("Incompatible game: %{error}", { error = err })
             self:_notify("error", { code = err })
             return nil, err
         end
@@ -633,7 +680,7 @@ function Controller:handle(message)
     elseif kind == "game_state" then
         local update, err = self:_apply_state(message.state)
         if not update then
-            self.status_text = "Estado inválido: " .. tostring(err)
+            self.status_text = T("Invalid state: %{error}", { error = err })
             self:_notify("error", { code = err })
             return nil, err
         end
@@ -654,11 +701,11 @@ function Controller:handle(message)
     elseif kind == "move_rejected" then
         if self.game_state then self.game_state:reject_pending() end
         if self.selection then self.selection:set_pending(false) end
-        self.status_text = "Jogada recusada"
+        self.status_text = T("Move rejected")
         self:_notify("move_rejected", message)
     elseif kind == "reconnecting" then
         self.connection = "reconnecting"
-        self.status_text = "Reconectando em " .. tostring(message.retryIn) .. " s…"
+        self.status_text = T("Reconnecting in %{seconds} s…", { seconds = message.retryIn })
         if self.game_state then self.game_state:begin_reconnect() end
         self.awaiting_reconnect_snapshot = true
         if self.selection then self.selection:set_pending(false) end
@@ -668,7 +715,7 @@ function Controller:handle(message)
         self.awaiting_reconnect_snapshot = true
         if self.selection then self.selection:set_pending(false) end
         self.connection = "reconnecting"
-        self.status_text = "Reconectando…"
+        self.status_text = T("Reconnecting…")
         self:_notify("disconnected", message)
     elseif kind == "game_finish" then
         self.result = message.game
@@ -681,19 +728,20 @@ function Controller:handle(message)
             self.review_position = assert(self:_position_at(self.review_index))
         end
         if message.game.status == "draw" then
-            self.status_text = "Empate"
+            self.status_text = T("Drawn game")
         elseif message.game.status == "aborted" then
-            self.status_text = "Partida abortada"
+            self.status_text = T("Game aborted")
         else
             local player_color = self.game and self.game.player_color
             self.status_text = normalize_winner(message.game.winner) == player_color
-                and "Vitória" or "Derrota"
+                and T("Victory") or T("Defeat")
         end
         self:_notify("game_finish", message)
     elseif kind == "error" then
         if message.requestId and message.requestId == self.chat_request_id then
             self.chat_pending, self.chat_request_id = false, nil
         end
+        self:remember_error(message.code)
         self.status_text = error_status(message)
         if message.fatal or self.view == "connecting" then self.connection = "offline" end
         if not message.fatal and (self.seeking or self.challenging) then
@@ -703,7 +751,7 @@ function Controller:handle(message)
         end
         self:_notify("error", message)
     elseif kind == "opponent_gone" then
-        self.status_text = message.gone and "Adversário desconectado" or "Adversário reconectou"
+        self.status_text = message.gone and T("Opponent disconnected") or T("Opponent reconnected")
         self:_notify("opponent_gone", message)
     elseif kind == "command_ok" then
         if message.command == "send_chat" and message.requestId == self.chat_request_id then

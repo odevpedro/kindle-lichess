@@ -10,6 +10,12 @@ local C = ffi.C
 local Process = {}
 Process.__index = Process
 
+local function file_exists(path)
+    local ok, lfs = pcall(require, "lfs")
+    if not ok then return true end
+    return lfs.attributes(path, "mode") ~= nil
+end
+
 local function valid_absolute_path(path)
     return type(path) == "string" and path:sub(1, 1) == "/"
         and not path:find("\0", 1, true)
@@ -28,6 +34,7 @@ function Process.new(options)
         socket_path = options.socket_path,
         schedule = options.schedule or function(_, callback) callback() end,
         util = options.util or FFIUtil,
+        file_exists = options.file_exists or file_exists,
         kill = options.kill or function(pid, signal) return C.kill(pid, signal) end,
         pid = nil,
         stop_generation = 0,
@@ -36,6 +43,7 @@ end
 
 function Process:start()
     if self.pid then return true end
+    if not self.file_exists(self.token_file) then return nil, "token_missing" end
     local binary, socket_path = self.binary, self.socket_path
     local token_file, ca_file = self.token_file, self.ca_file
     local pid = self.util.runInSubProcess(function()

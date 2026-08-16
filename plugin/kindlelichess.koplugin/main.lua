@@ -3,14 +3,17 @@
 
 local Controller = require("controller")
 local DataStorage = require("datastorage")
+local DiagnosticExport = require("storage/diagnostic_export")
 local Dispatcher = require("dispatcher")
+local I18n = require("i18n")
+local InfoMessage = require("ui/widget/infomessage")
 local MockBridge = require("bridge/mock_bridge")
 local PgnExport = require("storage/pgn_export")
 local Session = require("ui/session")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local time = require("ui/time")
-local _ = require("gettext")
+local T = I18n.t
 
 local KindleLichess = WidgetContainer:extend{
     name = "kindlelichess",
@@ -26,7 +29,7 @@ end
 function KindleLichess:onDispatcherRegisterActions()
     Dispatcher:registerAction("kindlelichess_start", {
         category = "none", event = "KindleLichessStart",
-        title = _("Kindle Lichess"), general = true,
+        title = T("Kindle Lichess"), general = true,
     })
 end
 
@@ -36,21 +39,28 @@ function KindleLichess:init()
 end
 
 function KindleLichess:addToMainMenu(menu_items)
+    local function configured_language()
+        return G_reader_settings:readSetting("kindlelichess_language") or "auto"
+    end
+    local function select_language(language)
+        G_reader_settings:saveSetting("kindlelichess_language", language)
+        I18n.set_language(language)
+    end
     menu_items.kindlelichess = {
-        text = _("Kindle Lichess"), sorting_hint = "more_tools",
+        text = T("Kindle Lichess"), sorting_hint = "more_tools",
         sub_item_table = {
             {
-                text = _("Open Kindle Lichess"),
+                text = T("Open Kindle Lichess"),
                 keep_menu_open = false,
                 callback = function() self:open() end,
             },
             {
-                text = _("Free board"),
+                text = T("Free board"),
                 keep_menu_open = false,
                 callback = function() self:open_free_board() end,
             },
             {
-                text = _("Mock mode"),
+                text = T("Mock mode"),
                 checked_func = function() return self:_bridge_mode() == "mock" end,
                 callback = function()
                     self.bridge_mode = nil
@@ -58,16 +68,56 @@ function KindleLichess:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Lichess test account"),
-                help_text = _("Uses a temporary 0600 token file and the official Board API."),
+                text = T("Lichess test account"),
+                help_text = T("Uses a temporary 0600 token file and the official Board API."),
                 checked_func = function() return self:_bridge_mode() == "live" end,
                 callback = function()
                     self.bridge_mode = nil
                     G_reader_settings:saveSetting("kindlelichess_bridge_mode", "live")
                 end,
             },
+            {
+                text = T("Language"),
+                sub_item_table = {
+                    {
+                        text = T("Automatic (KOReader)"),
+                        checked_func = function() return configured_language() == "auto" end,
+                        callback = function() select_language("auto") end,
+                    },
+                    {
+                        text = T("English"),
+                        checked_func = function() return configured_language() == "en" end,
+                        callback = function() select_language("en") end,
+                    },
+                    {
+                        text = T("Portuguese (Brazil)"),
+                        checked_func = function() return configured_language() == "pt_BR" end,
+                        callback = function() select_language("pt_BR") end,
+                    },
+                },
+            },
+            {
+                text = T("Export sanitized diagnostics"),
+                keep_menu_open = false,
+                callback = function() self:export_diagnostics() end,
+            },
         },
     }
+end
+
+function KindleLichess:export_diagnostics()
+    local directory = self.pgn_directory
+        or G_reader_settings:readSetting("kindlelichess_pgn_directory")
+        or "/mnt/us/documents/KindleLichess"
+    local path, err = DiagnosticExport.save(directory, {
+        language = I18n.language(),
+        bridge_mode = self:_bridge_mode(),
+        last_error = G_reader_settings:readSetting("kindlelichess_last_error") or "none",
+    })
+    local message = path and T("Sanitized diagnostics saved to %{path}", { path = path })
+        or T("Could not save diagnostics: %{error}", { error = err })
+    UIManager:show(InfoMessage:new{ text = message })
+    return path, err
 end
 
 function KindleLichess:onKindleLichessStart()
@@ -123,6 +173,9 @@ function KindleLichess:open()
         time_control = G_reader_settings:readSetting("kindlelichess_time_control") or "600+5",
         save_time_control = function(value)
             G_reader_settings:saveSetting("kindlelichess_time_control", value)
+        end,
+        record_error = function(code)
+            G_reader_settings:saveSetting("kindlelichess_last_error", code)
         end,
         pgn_directory = pgn_directory,
         pgn_writer = function(directory, game, content)

@@ -1,9 +1,9 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Copyright (C) 2026 Pedro Schmidt
 
-local _ = require("gettext")
+local T = require("i18n").t
 
 return {
-    fullname = _("Kindle Lichess"),
-    description = _([[Play human chess games on Lichess with an e-ink interface.]]),
+    fullname = T("Kindle Lichess"),
+    description = T("Play human chess games on Lichess with an e-ink interface."),
 }

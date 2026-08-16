@@ -37,6 +37,7 @@ mkdir -p "${package_root}/bin"
 install -m 0644 "${plugin_source}/_meta.lua" "${package_root}/_meta.lua"
 install -m 0644 "${plugin_source}/main.lua" "${package_root}/main.lua"
 install -m 0644 "${plugin_source}/controller.lua" "${package_root}/controller.lua"
+install -m 0644 "${plugin_source}/i18n.lua" "${package_root}/i18n.lua"
 for directory in bridge chess icons storage ui; do
     cp -a "${plugin_source}/${directory}" "${package_root}/${directory}"
 done

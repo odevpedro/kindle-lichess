@@ -9,11 +9,15 @@ local Pgn = require("chess/pgn")
 local Selection = require("chess/selection")
 local Clock = require("chess/clock")
 local GameState = require("chess/game_state")
+local I18n = require("i18n")
 local TimeControl = require("chess/time_control")
 local BoardGeometry = require("ui/board_geometry")
 local Controller = require("controller")
+local DiagnosticExport = require("storage/diagnostic_export")
 local MockBridge = require("bridge/mock_bridge")
 local Protocol = require("bridge/protocol")
+
+I18n.set_language("en")
 
 local count = 0
 local function check(condition, message)
@@ -26,6 +30,50 @@ local function piece(position, square, kind, color)
     check(value and value.type == kind and value.color == color,
         square .. " should contain " .. color .. kind)
 end
+
+check(I18n.normalize("pt-BR") == "pt_BR", "hyphenated Brazilian Portuguese is normalized")
+check(I18n.normalize("en_US") == "en", "English locale falls back to English")
+check(I18n.t("Open Kindle Lichess") == "Open Kindle Lichess",
+    "English source is the default and fallback")
+I18n.set_language("pt_BR")
+check(I18n.t("Open Kindle Lichess") == "Abrir Kindle Lichess",
+    "Brazilian Portuguese catalog translates known source strings")
+check(I18n.t("Connected as %{username}", { username = "Ana" }) == "Conectado como Ana",
+    "translations safely interpolate named values")
+check(I18n.t("Uncatalogued source") == "Uncatalogued source",
+    "missing catalog entries fall back to the English source")
+local original_reader_settings = rawget(_G, "G_reader_settings")
+_G.G_reader_settings = {
+    readSetting = function(_, name)
+        if name == "kindlelichess_language" then return "auto" end
+        if name == "language" then return "pt-BR" end
+    end,
+}
+I18n.set_language("auto")
+check(I18n.language() == "pt_BR" and I18n.t("Closed") == "Fechado",
+    "automatic mode follows the KOReader language setting")
+local translated_controller = Controller.new{ monotonic_now = function() return 0 end }
+check(translated_controller.status_text == "Fechado",
+    "controller status is translated through the shared catalog")
+_G.G_reader_settings = original_reader_settings
+I18n.set_language("en")
+
+local diagnostic_canary = "private-user-game-token-canary"
+local diagnostic = DiagnosticExport.format{
+    language = "pt_BR", bridge_mode = "live", last_error = "token_missing",
+    username = diagnostic_canary, game_id = diagnostic_canary, token = diagnostic_canary,
+}
+check(diagnostic:find("language=pt_BR", 1, true) ~= nil
+        and diagnostic:find("last_error=token_missing", 1, true) ~= nil,
+    "sanitized diagnostics retain allowlisted support fields")
+check(diagnostic:find(diagnostic_canary, 1, true) == nil,
+    "sanitized diagnostics omit account, game and token values")
+local poisoned_diagnostic = DiagnosticExport.format{
+    language = diagnostic_canary, bridge_mode = diagnostic_canary,
+    last_error = diagnostic_canary,
+}
+check(poisoned_diagnostic:find(diagnostic_canary, 1, true) == nil,
+    "sanitized diagnostics reject untrusted values even in allowlisted fields")
 
 local start = assert(Position.from_fen("startpos"))
 check(start:to_fen() == Position.START_FEN, "startpos must round-trip")
@@ -263,17 +311,17 @@ controller:simulate_disconnect()
 check(controller.connection == "connected" and controller.view == "game",
     "mock reconnect restores current game")
 assert(controller:offer_draw())
-check(controller.view == "result" and controller.status_text == "Empate", "draw reaches result screen")
+check(controller.view == "result" and controller.status_text == "Drawn game", "draw reaches result screen")
 controller:close()
 check(controller.view == "closed" and not mock.alive, "closing UI stops mock bridge")
 
 local result_cases = {
-    { status = "mate", winner = "white", summary = "Vitória das Brancas", detail = "por cheque-mate" },
-    { status = "resign", winner = "black", summary = "Vitória das Pretas", detail = "por desistência" },
-    { status = "timeout", winner = "w", summary = "Vitória das Brancas", detail = "por tempo esgotado" },
-    { status = "stalemate", winner = nil, summary = "Empate", detail = "por afogamento" },
-    { status = "draw", winner = nil, summary = "Empate", detail = "" },
-    { status = "aborted", winner = nil, summary = "Partida abortada", detail = "" },
+    { status = "mate", winner = "white", summary = "Victory for White", detail = "by checkmate" },
+    { status = "resign", winner = "black", summary = "Victory for Black", detail = "by resignation" },
+    { status = "timeout", winner = "w", summary = "Victory for White", detail = "on time" },
+    { status = "stalemate", winner = nil, summary = "Drawn game", detail = "by stalemate" },
+    { status = "draw", winner = nil, summary = "Drawn game", detail = "" },
+    { status = "aborted", winner = nil, summary = "Game aborted", detail = "" },
 }
 local result_controller = Controller.new({ monotonic_now = function() return now end })
 result_controller.closed = false
@@ -384,7 +432,11 @@ assert(outbound_controller:handle({
 check(outbound_controller.view == "lobby", "canceled challenge returns to lobby")
 outbound_controller:close()
 
-local invalid_controller = Controller.new({ monotonic_now = function() return now end })
+local recorded_error
+local invalid_controller = Controller.new({
+    monotonic_now = function() return now end,
+    record_error = function(code) recorded_error = code end,
+})
 invalid_controller.closed = false
 local invalid_ok, invalid_err = invalid_controller:handle({ v = 1, type = "connected", account = {} })
 check(not invalid_ok and invalid_err == "invalid_account", "malformed bridge message is recoverable")
@@ -393,8 +445,35 @@ assert(invalid_controller:handle({
     message = "Bridge request failed", fatal = false,
 }))
 check(invalid_controller.status_text
-        == "Lichess recusou a ação; o desafio pode ter expirado (lichess_rejected)",
+        == "Lichess rejected the action; the challenge may have expired (lichess_rejected)",
     "controller exposes a useful API error instead of a generic bridge failure")
+check(recorded_error == "lichess_rejected", "controller records only the stable error code")
+local private_error_canary = "private-upstream-error-canary"
+assert(invalid_controller:handle({
+    v = 1, type = "error", code = "future_error",
+    message = private_error_canary, fatal = false,
+}))
+check(invalid_controller.status_text == "Unexpected bridge error (future_error)"
+        and not invalid_controller.status_text:find(private_error_canary, 1, true),
+    "unknown bridge errors do not expose raw upstream text")
+
+local startup_error
+local startup_controller = Controller.new({
+    monotonic_now = function() return now end,
+    record_error = function(code) startup_error = code end,
+})
+startup_controller:attach_bridge({
+    start = function() return nil, "token_missing" end,
+    send = function() error("connect must not be sent after failed startup") end,
+})
+local startup_ok, startup_err = startup_controller:start()
+check(not startup_ok and startup_err == "token_missing"
+        and startup_error == "token_missing"
+        and startup_controller.connection == "offline",
+    "missing token is reported before a generic socket failure")
+check(startup_controller.status_text
+        == "No Lichess token was found. Add the token and reopen the plugin (token_missing)",
+    "missing token has an actionable message")
 
 local connecting_controller = Controller.new({ monotonic_now = function() return now end })
 connecting_controller.closed = false
@@ -468,7 +547,7 @@ check(promotion_controller:tap_square("a7").type == "selected", "mock promotion 
 local promotion_prompt = promotion_controller:tap_square("a8")
 check(promotion_prompt.type == "promotion", "mock promotion requests piece")
 assert(promotion_controller:promote("a7", "a8", "q"))
-check(promotion_controller.view == "result" and promotion_controller.status_text == "Vitória",
+check(promotion_controller.view == "result" and promotion_controller.status_text == "Victory",
     "promotion scenario reaches victory")
 promotion_controller:close()
 
@@ -478,7 +557,7 @@ defeat_controller:attach_bridge(defeat_mock)
 defeat_controller:start()
 assert(defeat_controller:accept_challenge())
 assert(defeat_mock:simulate_result("defeat"))
-check(defeat_controller.view == "result" and defeat_controller.status_text == "Derrota",
+check(defeat_controller.view == "result" and defeat_controller.status_text == "Defeat",
     "mock defeat reaches result screen")
 defeat_controller:close()
 
@@ -488,7 +567,7 @@ abort_controller:attach_bridge(abort_mock)
 abort_controller:start()
 assert(abort_controller:accept_challenge())
 assert(abort_controller:abort())
-check(abort_controller.status_text == "Partida abortada", "mock abort is not reported as defeat")
+check(abort_controller.status_text == "Game aborted", "mock abort is not reported as defeat")
 abort_controller:close()
 
 local queued, canceled = {}, {}
