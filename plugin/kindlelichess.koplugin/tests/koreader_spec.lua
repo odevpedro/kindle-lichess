@@ -187,6 +187,13 @@ describe("Kindle Lichess KOReader integration", function()
         assert.equals(board.squares.a1.size * 8 + board.label_size, board:getSize().w)
         assert.equals("r", board.squares.a8.piece.type)
         assert.equals("w", board.squares.e1.piece.color)
+        -- Standard chess coloring: a1 and h8 are dark, h1 and a8 are light.
+        local dark = Blitbuffer.COLOR_LIGHT_GRAY
+        local light = Blitbuffer.COLOR_WHITE
+        assert.equals(dark, board.squares.a1:_background(), "a1 must be dark")
+        assert.equals(light, board.squares.h1:_background(), "h1 must be light")
+        assert.equals(light, board.squares.a8:_background(), "a8 must be light")
+        assert.equals(dark, board.squares.h8:_background(), "h8 must be dark")
         local framebuffer = Blitbuffer.new(600, 600)
         board:paintTo(framebuffer, 0, 0)
         board.squares.e2:onTapSquare()

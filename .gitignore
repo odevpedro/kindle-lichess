@@ -6,6 +6,7 @@
 *.lichess-token
 *.key
 *.pem
+/key.txt
 
 # Build and test outputs
 /dist/

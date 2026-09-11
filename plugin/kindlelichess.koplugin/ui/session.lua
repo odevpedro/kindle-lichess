@@ -278,7 +278,13 @@ function Session:_build_game()
         action_row[#action_row + 1] = {
             text = finish_text, callback = function() self:_confirm_finish(moves_played < 2) end,
         }
-        actions = self:_button_table({ history_row, action_row })
+        local history_actions = self:_button_table({ history_row })
+        local game_actions = ButtonTable:new{
+            buttons = { action_row },
+            width = math.floor(Screen:getWidth() * 0.68),
+            show_parent = self,
+        }
+        actions = VerticalGroup:new{ align = "center", history_actions, game_actions }
         self.promotion_actions = nil
     end
 

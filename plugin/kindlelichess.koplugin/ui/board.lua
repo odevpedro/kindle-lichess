@@ -83,7 +83,7 @@ function Square:_background()
     if self.checked then return Blitbuffer.COLOR_GRAY end
     local file = self.square:byte(1) - string.byte("a")
     local rank = tonumber(self.square:sub(2, 2)) - 1
-    return (file + rank) % 2 == 0 and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_LIGHT_GRAY
+    return (file + rank) % 2 == 0 and Blitbuffer.COLOR_LIGHT_GRAY or Blitbuffer.COLOR_WHITE
 end
 
 function Square:_build()
