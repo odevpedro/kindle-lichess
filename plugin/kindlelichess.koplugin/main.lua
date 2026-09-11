@@ -6,6 +6,7 @@ local DataStorage = require("datastorage")
 local DiagnosticExport = require("storage/diagnostic_export")
 local Dispatcher = require("dispatcher")
 local I18n = require("i18n")
+local InputDialog = require("ui/widget/inputdialog")
 local InfoMessage = require("ui/widget/infomessage")
 local MockBridge = require("bridge/mock_bridge")
 local PgnExport = require("storage/pgn_export")
@@ -19,6 +20,7 @@ local KindleLichess = WidgetContainer:extend{
     name = "kindlelichess",
     is_doc_only = false,
     session = nil,
+    token_file = "/tmp/kindle-lichess-token",
 }
 
 local function absolute_path(root, path)
@@ -161,6 +163,59 @@ function KindleLichess:_new_bridge(controller)
     return live_factory(callbacks)
 end
 
+function KindleLichess:_token_exists(path)
+    local f = io.open(path, "r")
+    if not f then return false end
+    f:close()
+    return true
+end
+
+function KindleLichess:_write_token(token, path)
+    local f = io.open(path, "w")
+    if not f then return false end
+    f:write(token)
+    f:close()
+    return os.execute("chmod 0600 " .. path) == 0
+end
+
+function KindleLichess:_show_login(on_done)
+    local dialog
+    dialog = InputDialog:new{
+        title = T("Login"),
+        description = T("Enter your Lichess token with board:play permission"),
+        input = "",
+        allow_early_enter = true,
+        buttons = {{
+            { id = "cancel", text = T("Cancel"), callback = function()
+                self.session = nil
+                self:_dismiss_login()
+            end },
+            { id = "login", text = T("Login"), callback = function()
+                local token = dialog:getInputText()
+                self:_dismiss_login()
+                if not token or token == "" then return end
+                if not self:_write_token(token, self.token_file) then
+                    UIManager:show(InfoMessage:new{
+                        text = T("Could not save token. Check permissions."),
+                    })
+                    return
+                end
+                on_done()
+            end },
+        }},
+    }
+    self._login_dialog = dialog
+    UIManager:show(dialog, "flashui")
+    dialog:onShowKeyboard()
+end
+
+function KindleLichess:_dismiss_login()
+    if self._login_dialog then
+        UIManager:close(self._login_dialog, "flashui")
+        self._login_dialog = nil
+    end
+end
+
 function KindleLichess:open()
     if self.session then return end
     local pgn_directory = self.pgn_directory
@@ -188,6 +243,14 @@ function KindleLichess:open()
         controller = controller,
         on_close = function() self.session = nil end,
     }
+    if self:_bridge_mode() == "live" and not self:_token_exists(self.token_file) then
+        local token_file = self.token_file
+        self:_show_login(function()
+            UIManager:show(self.session, "flashui")
+            controller:start()
+        end)
+        return
+    end
     UIManager:show(self.session, "flashui")
     controller:start()
 end
