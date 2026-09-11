@@ -8,7 +8,9 @@
 *.pem
 /key.txt
 
-# Build and test outputs
+# Local-only agent and release docs (never commit)
+agents.md
+docs/public-release-readiness.private.md
 /dist/
 /bridge/bin/
 *.test
